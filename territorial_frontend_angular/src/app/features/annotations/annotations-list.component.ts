@@ -31,6 +31,7 @@ import { DataTableAction, DataTableColumn } from '../../shared/components/data-t
 import { DataTableComponent } from '../../shared/components/data-table/data-table.component';
 import { FileUploadComponent } from '../../shared/components/file-upload/file-upload.component';
 import { ToastService } from '../../shared/services/toast.service';
+import { normalizeStatus } from '../../core/utils/status.utils';
 
 @Component({
   selector: 'app-annotations-list',
@@ -69,8 +70,8 @@ import { ToastService } from '../../shared/services/toast.service';
             <label>
               Estado
               <select formControlName="status">
-                <option value="Activa">Activa</option>
-                <option value="Inactiva">Inactiva</option>
+                <option value="active">Activa</option>
+                <option value="inactive">Inactiva</option>
               </select>
             </label>
 
@@ -158,8 +159,8 @@ import { ToastService } from '../../shared/services/toast.service';
               Estado
               <select [(ngModel)]="filters.status" (change)="filterAnnotations()">
                 <option value="">Todos</option>
-                <option value="Activa">Activa</option>
-                <option value="Inactiva">Inactiva</option>
+                <option value="active">Activa</option>
+                <option value="inactive">Inactiva</option>
               </select>
             </label>
           </div>
@@ -298,7 +299,7 @@ export class AnnotationsListComponent {
     description: new FormControl('', { nonNullable: true }),
     latitude: new FormControl<number | null>(null),
     longitude: new FormControl<number | null>(null),
-    status: new FormControl<TerritorialStatus>('Activa', { nonNullable: true }),
+    status: new FormControl<TerritorialStatus>('active', { nonNullable: true }),
     categoryIds: new FormControl<number[]>([]),
     interestedEntityIds: new FormControl<number[]>([])
   });
@@ -368,8 +369,41 @@ export class AnnotationsListComponent {
   }
 
   createAnnotation(): void {
-    if (!this.annotationForm.value.id_citizen || !this.annotationForm.value.description) {
-      this.toastService.danger('Formulario incompleto', 'Seleccione un ciudadano y escriba una descripción.');
+    const idCitizen = this.annotationForm.controls.id_citizen.value;
+    const description = this.annotationForm.controls.description.value;
+    const latitude = this.annotationForm.controls.latitude.value;
+    const longitude = this.annotationForm.controls.longitude.value;
+
+    // Validate required fields
+    if (!idCitizen) {
+      this.toastService.danger('Campo requerido', 'Debe seleccionar un ciudadano.');
+      return;
+    }
+
+    if (!description?.trim()) {
+      this.toastService.danger('Campo requerido', 'Debe escribir una descripción.');
+      return;
+    }
+
+    // Validate coordinates
+    if (latitude === null || latitude === undefined) {
+      this.toastService.danger('Campo requerido', 'Debe ingresar la latitud.');
+      return;
+    }
+
+    if (longitude === null || longitude === undefined) {
+      this.toastService.danger('Campo requerido', 'Debe ingresar la longitud.');
+      return;
+    }
+
+    // Validate coordinate ranges
+    if (latitude < -90 || latitude > 90) {
+      this.toastService.danger('Valor inválido', 'La latitud debe estar entre -90 y 90.');
+      return;
+    }
+
+    if (longitude < -180 || longitude > 180) {
+      this.toastService.danger('Valor inválido', 'La longitud debe estar entre -180 y 180.');
       return;
     }
 
@@ -377,11 +411,11 @@ export class AnnotationsListComponent {
       id_neighborhood: this.annotationForm.controls.id_neighborhood.value
         ? Number(this.annotationForm.controls.id_neighborhood.value)
         : undefined,
-      id_citizen: Number(this.annotationForm.controls.id_citizen.value),
-      description: this.annotationForm.controls.description.value,
-      latitude: Number(this.annotationForm.controls.latitude.value ?? 0),
-      longitude: Number(this.annotationForm.controls.longitude.value ?? 0),
-      status: this.annotationForm.controls.status.value
+      id_citizen: Number(idCitizen),
+      description: description.trim(),
+      latitude: Number(latitude),
+      longitude: Number(longitude),
+      status: normalizeStatus(this.annotationForm.controls.status.value)
     };
 
     this.annotationService.create(payload).pipe(
@@ -505,7 +539,7 @@ export class AnnotationsListComponent {
       description: '',
       latitude: null,
       longitude: null,
-      status: 'Activa',
+      status: 'active',
       categoryIds: [],
       interestedEntityIds: []
     });
