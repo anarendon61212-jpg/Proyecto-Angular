@@ -1,0 +1,30 @@
+@if (open) {
+  <div class="drawer-backdrop" (click)="closePanel()" aria-hidden="true"></div>
+
+  <aside class="drawer-panel" [ngClass]="'drawer-panel--' + size" role="dialog" aria-modal="true" [attr.aria-label]="title">
+    <header class="drawer-panel__header">
+      <div>
+        <h2>{{ title }}</h2>
+        @if (description) {
+          <p>{{ description }}</p>
+        }
+      </div>
+
+      @if (showCloseButton) {
+        <button type="button" class="drawer-panel__close" aria-label="Cerrar panel" (click)="closePanel()">
+          ×
+        </button>
+      }
+    </header>
+
+    <section class="drawer-panel__body">
+      <ng-content />
+    </section>
+
+    @if (showFooter) {
+      <footer class="drawer-panel__footer">
+        <ng-content select="[drawer-footer]" />
+      </footer>
+    }
+  </aside>
+}

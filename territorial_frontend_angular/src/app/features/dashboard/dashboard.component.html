@@ -1,0 +1,22 @@
+<section class="dashboard-hero app-card">
+  <div>
+    <p class="dashboard-hero__eyebrow">Base lista</p>
+    <h2>Plantilla Angular preparada para crecer por módulos</h2>
+    <p>
+      Ya existen routing, shell, auth local, guards, interceptores, loading global,
+      manejo de errores y cliente HTTP para conectar con el backend Flask.
+    </p>
+  </div>
+
+  <span class="dashboard-hero__badge">Core OK</span>
+</section>
+
+<section class="dashboard-grid">
+  @for (item of checklist; track item.title) {
+    <article class="dashboard-card app-card">
+      <span>{{ item.icon }}</span>
+      <h3>{{ item.title }}</h3>
+      <p>{{ item.description }}</p>
+    </article>
+  }
+</section>

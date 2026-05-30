@@ -1,0 +1,42 @@
+.file-upload {
+  align-items: center;
+  border: 1.5px dashed #9db8ff;
+  border-radius: 16px;
+  color: var(--color-ink);
+  display: grid;
+  gap: 0.45rem;
+  justify-items: center;
+  min-height: 148px;
+  padding: 1.25rem;
+  text-align: center;
+}
+
+.file-upload:hover,
+.file-upload--dragging {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+
+input {
+  display: none;
+}
+
+.file-upload__icon {
+  color: var(--color-primary);
+  font-size: 2rem;
+}
+
+strong {
+  font-size: 0.95rem;
+}
+
+small {
+  color: var(--color-muted);
+}
+
+ul {
+  color: var(--color-muted);
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+}

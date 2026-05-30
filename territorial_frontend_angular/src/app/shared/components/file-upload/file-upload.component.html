@@ -1,0 +1,26 @@
+<label
+  class="file-upload"
+  [class.file-upload--dragging]="isDragging"
+  (dragover)="onDragOver($event)"
+  (dragleave)="onDragLeave($event)"
+  (drop)="onDrop($event)"
+>
+  <input
+    type="file"
+    [accept]="accept"
+    [multiple]="multiple"
+    (change)="onInputChange($event)"
+  >
+
+  <span class="file-upload__icon">☁</span>
+  <strong>{{ label }}</strong>
+  <small>{{ hint }}</small>
+
+  @if (selectedFileNames.length > 0) {
+    <ul>
+      @for (fileName of selectedFileNames; track fileName) {
+        <li>{{ fileName }}</li>
+      }
+    </ul>
+  }
+</label>

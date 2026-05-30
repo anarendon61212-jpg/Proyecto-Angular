@@ -1,0 +1,87 @@
+<div class="shell" [attr.data-role]="currentRole()">
+  <aside class="sidebar">
+    <a class="brand" routerLink="/dashboard" aria-label="Ir al inicio">
+      <span class="brand__mark">
+        <span></span>
+      </span>
+      <span>
+        <strong>Valoración</strong>
+        <strong>Territorial</strong>
+      </span>
+    </a>
+
+    <nav class="navigation" aria-label="Navegación principal">
+      @for (section of navigationSections(); track section.label) {
+        <section class="navigation__section">
+          <p class="navigation__title">{{ section.label }}</p>
+
+          @for (item of section.items; track item.route) {
+            <a
+              class="navigation__link"
+              [routerLink]="item.route"
+              routerLinkActive="navigation__link--active"
+              [routerLinkActiveOptions]="{ exact: item.route === '/dashboard' }"
+            >
+              <span class="navigation__icon">{{ item.icon }}</span>
+              <span>{{ item.label }}</span>
+            </a>
+          }
+        </section>
+      }
+    </nav>
+
+    <section class="profile-card" aria-label="Usuario autenticado">
+      <span class="profile-card__avatar">{{ currentUser()?.initials }}</span>
+      <span>
+        <strong>{{ currentUser()?.name }}</strong>
+        <small>{{ currentUser()?.entityName || currentUser()?.role }}</small>
+      </span>
+    </section>
+  </aside>
+
+  <div class="workspace">
+    <header class="topbar">
+      <div>
+        <p class="topbar__eyebrow">{{ currentRole() || 'Sesión' }}</p>
+        <h1>{{ appName }}</h1>
+      </div>
+
+      <div class="topbar__actions">
+        @if (isLoading()) {
+          <span class="status-pill status-pill--loading">Cargando</span>
+        }
+
+        <button class="icon-button icon-button--notification" type="button" aria-label="Notificaciones">
+          🔔
+          @if (notificationCount > 0) {
+            <span>{{ notificationCount }}</span>
+          }
+        </button>
+
+        <button class="user-menu" type="button" title="Cerrar sesión" (click)="logout()">
+          <span class="user-menu__avatar">{{ currentUser()?.initials }}</span>
+          <span>
+            <strong>{{ currentUser()?.name }}</strong>
+            <small>{{ currentUser()?.entityName || currentUser()?.role }}</small>
+          </span>
+          <span aria-hidden="true">⌄</span>
+        </button>
+      </div>
+    </header>
+
+    @if (lastError(); as error) {
+      <section class="error-banner" role="alert">
+        <span>⚠</span>
+        <strong>{{ error.message }}</strong>
+        <button type="button" (click)="clearError()">Cerrar</button>
+      </section>
+    }
+
+    <main class="content">
+      <router-outlet />
+    </main>
+  </div>
+</div>
+
+<app-toast-container></app-toast-container>
+<app-confirm-dialog></app-confirm-dialog>

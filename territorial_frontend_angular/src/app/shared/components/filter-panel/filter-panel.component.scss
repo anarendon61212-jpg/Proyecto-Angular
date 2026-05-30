@@ -1,0 +1,49 @@
+.filter-panel {
+  display: none;
+  overflow: hidden;
+}
+
+.filter-panel--open {
+  display: block;
+}
+
+.filter-panel__header {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+}
+
+.filter-panel__header h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.filter-panel__header span {
+  color: var(--color-primary);
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 800;
+  margin-top: 0.2rem;
+}
+
+.filter-panel__header button {
+  background: transparent;
+  border: 0;
+  font-size: 1.5rem;
+}
+
+.filter-panel__body {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.filter-panel__footer {
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  padding: 1rem 1.25rem;
+}

@@ -1,0 +1,27 @@
+<nav class="paginator" aria-label="Paginación">
+  <p>
+    Mostrando
+    <strong>{{ fromItem }}</strong>
+    a
+    <strong>{{ toItem }}</strong>
+    de
+    <strong>{{ totalItems }}</strong>
+  </p>
+
+  <div class="paginator__controls">
+    <button type="button" [disabled]="page <= 1" (click)="changePage(page - 1)">Anterior</button>
+
+    @for (visiblePage of visiblePages; track visiblePage) {
+      <button
+        type="button"
+        class="paginator__page"
+        [class.paginator__page--active]="visiblePage === page"
+        (click)="changePage(visiblePage)"
+      >
+        {{ visiblePage }}
+      </button>
+    }
+
+    <button type="button" [disabled]="page >= totalPagesResolved" (click)="changePage(page + 1)">Siguiente</button>
+  </div>
+</nav>

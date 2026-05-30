@@ -1,0 +1,17 @@
+<label class="search-box">
+  <span aria-hidden="true">⌕</span>
+  <input
+    type="search"
+    [value]="value"
+    [placeholder]="placeholder"
+    [attr.aria-label]="ariaLabel"
+    (input)="onInput($event)"
+    (keydown.enter)="submit()"
+  >
+
+  @if (value) {
+    <button type="button" aria-label="Limpiar búsqueda" (click)="clear()">
+      ×
+    </button>
+  }
+</label>

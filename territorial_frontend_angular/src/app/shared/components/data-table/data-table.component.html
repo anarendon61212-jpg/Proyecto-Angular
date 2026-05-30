@@ -1,0 +1,77 @@
+<section class="data-table app-card">
+  @if (title || description || actionsTemplate) {
+    <header class="data-table__header">
+      <div>
+        @if (title) {
+          <h2>{{ title }}</h2>
+        }
+        @if (description) {
+          <p>{{ description }}</p>
+        }
+      </div>
+
+      <ng-container [ngTemplateOutlet]="actionsTemplate" />
+    </header>
+  }
+
+  @if (rows.length > 0) {
+    <div class="data-table__scroll">
+      <table>
+        <thead>
+          <tr>
+            @for (column of columns; track columnTrack(column)) {
+              <th [style.width]="column.width" [class]="alignmentClass(column.align)">
+                {{ column.header }}
+              </th>
+            }
+
+            @if (actions.length > 0) {
+              <th class="data-table__actions-header">Acciones</th>
+            }
+          </tr>
+        </thead>
+
+        <tbody>
+          @for (row of rows; track rowTrack(row, $index)) {
+            <tr>
+              @for (column of columns; track columnTrack(column)) {
+                <td [class]="alignmentClass(column.align)">
+                  @if (column.type === 'badge') {
+                    <app-status-badge
+                      [value]="columnValue(row, column)"
+                      [variant]="column.badgeVariant ? column.badgeVariant(row) : undefined"
+                    />
+                  } @else {
+                    {{ columnValue(row, column) }}
+                  }
+                </td>
+              }
+
+              @if (actions.length > 0) {
+                <td class="data-table__actions">
+                  @for (action of visibleActions(row); track action.id) {
+                    <button
+                      type="button"
+                      class="data-table__action"
+                      [ngClass]="'data-table__action--' + (action.tone || 'default')"
+                      [disabled]="isActionDisabled(row, action)"
+                      [attr.aria-label]="action.label"
+                      (click)="emitAction(row, action.id)"
+                    >
+                      <span aria-hidden="true">{{ action.icon || '•' }}</span>
+                      <span class="sr-only">{{ action.label }}</span>
+                    </button>
+                  }
+                </td>
+              }
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  } @else {
+    <div class="data-table__empty">
+      <ng-content select="[empty]" />
+    </div>
+  }
+</section>

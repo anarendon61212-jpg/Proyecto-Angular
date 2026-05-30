@@ -1,0 +1,14 @@
+<section class="toast-stack" aria-live="polite" aria-label="Notificaciones">
+  @for (toast of toasts(); track toast.id) {
+    <article class="toast" [ngClass]="'toast--' + toast.variant">
+      <span class="toast__icon" aria-hidden="true">{{ iconFor(toast.variant) }}</span>
+      <div>
+        <strong>{{ toast.title }}</strong>
+        @if (toast.message) {
+          <p>{{ toast.message }}</p>
+        }
+      </div>
+      <button type="button" aria-label="Cerrar notificación" (click)="dismiss(toast.id)">×</button>
+    </article>
+  }
+</section>

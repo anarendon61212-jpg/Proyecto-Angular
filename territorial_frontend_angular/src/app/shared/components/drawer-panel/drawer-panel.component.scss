@@ -1,0 +1,69 @@
+.drawer-backdrop {
+  background: rgba(7, 19, 51, 0.28);
+  inset: 0;
+  position: fixed;
+  z-index: 40;
+}
+
+.drawer-panel {
+  background: #ffffff;
+  border-left: 1px solid var(--color-border);
+  box-shadow: -24px 0 60px rgba(15, 35, 95, 0.18);
+  display: flex;
+  flex-direction: column;
+  inset: 0 0 0 auto;
+  max-width: min(100vw, 680px);
+  position: fixed;
+  width: min(100vw, 560px);
+  z-index: 50;
+}
+
+.drawer-panel--sm {
+  width: min(100vw, 420px);
+}
+
+.drawer-panel--lg {
+  width: min(100vw, 760px);
+}
+
+.drawer-panel__header {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 1.5rem;
+}
+
+.drawer-panel__header h2 {
+  font-size: 1.35rem;
+  margin: 0;
+}
+
+.drawer-panel__header p {
+  color: var(--color-muted);
+  margin: 0.35rem 0 0;
+}
+
+.drawer-panel__close {
+  background: transparent;
+  border: 0;
+  color: var(--color-ink);
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.drawer-panel__body {
+  flex: 1;
+  overflow: auto;
+  padding: 1.5rem;
+}
+
+.drawer-panel__footer {
+  background: #ffffff;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  padding: 1rem 1.5rem;
+}

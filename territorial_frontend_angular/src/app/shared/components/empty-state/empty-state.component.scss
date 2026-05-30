@@ -1,0 +1,32 @@
+.empty-state {
+  align-items: center;
+  color: var(--color-muted);
+  display: grid;
+  justify-items: center;
+  padding: 2.5rem 1rem;
+  text-align: center;
+}
+
+.empty-state__icon {
+  align-items: center;
+  background: var(--color-primary-soft);
+  border-radius: 999px;
+  color: var(--color-primary);
+  display: inline-flex;
+  font-size: 2rem;
+  height: 72px;
+  justify-content: center;
+  margin-bottom: 1rem;
+  width: 72px;
+}
+
+h2 {
+  color: var(--color-ink);
+  font-size: 1.2rem;
+  margin: 0;
+}
+
+p {
+  margin: 0.45rem 0 0;
+  max-width: 420px;
+}

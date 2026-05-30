@@ -1,0 +1,29 @@
+<main class="login-page">
+  <section class="login-card app-card">
+    <div class="login-card__brand">
+      <span class="login-card__mark">◆</span>
+      <span>
+        <strong>Valoración Territorial</strong>
+        <small>Plantilla inicial conectada al backend Flask</small>
+      </span>
+    </div>
+
+    <div>
+      <p class="eyebrow">Autenticación temporal</p>
+      <h1>Elige un rol para entrar</h1>
+      <p class="description">
+        Este login simula la sesión mientras se implementan OAuth y emisión de token en el backend.
+      </p>
+    </div>
+
+    <div class="role-grid">
+      @for (role of roles; track role) {
+        <button class="role-card" type="button" (click)="login(role)">
+          <span>{{ roleInitial(role) }}</span>
+          <strong>{{ role }}</strong>
+          <small>Entrar como {{ role.toLowerCase() }}</small>
+        </button>
+      }
+    </div>
+  </section>
+</main>

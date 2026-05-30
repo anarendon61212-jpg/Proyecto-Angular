@@ -1,0 +1,27 @@
+@if (dialog(); as currentDialog) {
+  <div class="confirm-backdrop" aria-hidden="true" (click)="cancel()"></div>
+
+  <section class="confirm-dialog" role="dialog" aria-modal="true" [attr.aria-label]="currentDialog.title">
+    <span class="confirm-dialog__icon" [class.confirm-dialog__icon--danger]="currentDialog.tone === 'danger'">
+      {{ currentDialog.tone === 'danger' ? '!' : '?' }}
+    </span>
+
+    <h2>{{ currentDialog.title }}</h2>
+    <p>{{ currentDialog.message }}</p>
+
+    <footer>
+      <button type="button" class="app-button app-button--secondary" (click)="cancel()">
+        {{ currentDialog.cancelText }}
+      </button>
+      <button
+        type="button"
+        class="app-button"
+        [class.app-button--primary]="currentDialog.tone === 'primary'"
+        [class.confirm-dialog__danger-button]="currentDialog.tone === 'danger'"
+        (click)="accept()"
+      >
+        {{ currentDialog.confirmText }}
+      </button>
+    </footer>
+  </section>
+}

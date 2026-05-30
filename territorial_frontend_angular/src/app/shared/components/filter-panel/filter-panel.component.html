@@ -1,0 +1,21 @@
+<section class="filter-panel app-card" [class.filter-panel--open]="open">
+  <header class="filter-panel__header">
+    <div>
+      <h2>{{ title }}</h2>
+      @if (activeCount > 0) {
+        <span>{{ activeCount }} activos</span>
+      }
+    </div>
+
+    <button type="button" aria-label="Cerrar filtros" (click)="close.emit()">×</button>
+  </header>
+
+  <div class="filter-panel__body">
+    <ng-content />
+  </div>
+
+  <footer class="filter-panel__footer">
+    <button type="button" class="app-button app-button--secondary" (click)="clear.emit()">Limpiar</button>
+    <button type="button" class="app-button app-button--primary" (click)="apply.emit()">Aplicar filtros</button>
+  </footer>
+</section>
