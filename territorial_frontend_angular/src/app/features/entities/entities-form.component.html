@@ -1,0 +1,135 @@
+<form [formGroup]="form" (ngSubmit)="onSubmit()" class="entities-form">
+  @if (duplicateError) {
+    <div class="error-banner">
+      {{ duplicateError }}
+    </div>
+  }
+
+  <div class="form-group">
+    <label for="name">Nombre <span class="required">*</span></label>
+    <input
+      id="name"
+      type="text"
+      formControlName="name"
+      placeholder="Nombre de la entidad"
+      class="form-input"
+      [class.is-invalid]="form.get('name')?.invalid && form.get('name')?.touched"
+    />
+    @if (form.get('name')?.invalid && form.get('name')?.touched) {
+      <span class="error-text">{{ nameError }}</span>
+    }
+  </div>
+
+  <div class="form-group">
+    <label for="nit">NIT <span class="required">*</span></label>
+    <input
+      id="nit"
+      type="text"
+      formControlName="nit"
+      placeholder="1234567890"
+      class="form-input"
+      [class.is-invalid]="form.get('nit')?.invalid && form.get('nit')?.touched"
+    />
+    @if (form.get('nit')?.invalid && form.get('nit')?.touched) {
+      <span class="error-text">{{ nitError }}</span>
+    }
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label for="email">Correo <span class="required">*</span></label>
+      <input
+        id="email"
+        type="email"
+        formControlName="email"
+        placeholder="info@entidad.gov.co"
+        class="form-input"
+        [class.is-invalid]="form.get('email')?.invalid && form.get('email')?.touched"
+      />
+      @if (form.get('email')?.invalid && form.get('email')?.touched) {
+        <span class="error-text">{{ emailError }}</span>
+      }
+    </div>
+
+    <div class="form-group">
+      <label for="phone">Teléfono</label>
+      <input
+        id="phone"
+        type="tel"
+        formControlName="phone"
+        placeholder="+57 6 xxxx xxxx"
+        class="form-input"
+      />
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label for="address">Dirección</label>
+    <input
+      id="address"
+      type="text"
+      formControlName="address"
+      placeholder="Calle 10 # 15-45"
+      class="form-input"
+    />
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label for="status">Estado <span class="required">*</span></label>
+      <select
+        id="status"
+        formControlName="status"
+        class="form-input"
+        [class.is-invalid]="form.get('status')?.invalid && form.get('status')?.touched"
+      >
+        <option value="">Selecciona un estado</option>
+        @for (option of statusOptions; track option.value) {
+          <option [value]="option.value">{{ option.label }}</option>
+        }
+      </select>
+      @if (form.get('status')?.invalid && form.get('status')?.touched) {
+        <span class="error-text">{{ statusError }}</span>
+      }
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label>Logo</label>
+    @if (previewUrl) {
+      <div class="logo-preview">
+        <img [src]="previewUrl" alt="Logo preview" />
+      </div>
+    }
+    <app-file-upload
+      [accept]="'image/png,image/jpeg,image/jpg,image/webp'"
+      [maxSizeMb]="2"
+      label="Arrastra el logo aquí"
+      hint="o haz clic para seleccionar"
+      (filesSelected)="onFileSelected($event)"
+      (invalidFiles)="onInvalidFiles($event)"
+    ></app-file-upload>
+  </div>
+
+  <div class="form-actions">
+    <button
+      type="button"
+      (click)="onCancel()"
+      class="btn btn-secondary"
+      [disabled]="isSubmitting"
+    >
+      Cancelar
+    </button>
+    <button
+      type="submit"
+      class="btn btn-primary"
+      [disabled]="form.invalid || isSubmitting"
+    >
+      @if (isSubmitting) {
+        Guardando...
+      } @else {
+        {{ entity ? 'Actualizar' : 'Crear' }}
+      }
+    </button>
+  </div>
+</form>

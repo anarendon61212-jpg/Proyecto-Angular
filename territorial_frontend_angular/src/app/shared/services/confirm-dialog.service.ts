@@ -8,6 +8,7 @@ export interface ConfirmDialogOptions {
   confirmText?: string;
   cancelText?: string;
   tone?: ConfirmDialogTone;
+  showCancel?: boolean;
 }
 
 export interface ConfirmDialogState extends Required<ConfirmDialogOptions> {}
@@ -27,7 +28,8 @@ export class ConfirmDialogService {
       message: options.message,
       confirmText: options.confirmText ?? 'Confirmar',
       cancelText: options.cancelText ?? 'Cancelar',
-      tone: options.tone ?? 'primary'
+      tone: options.tone ?? 'primary',
+      showCancel: options.showCancel ?? true
     };
 
     this.dialogState.set(state);

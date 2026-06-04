@@ -10,9 +10,11 @@
     <p>{{ currentDialog.message }}</p>
 
     <footer>
-      <button type="button" class="app-button app-button--secondary" (click)="cancel()">
-        {{ currentDialog.cancelText }}
-      </button>
+      @if (currentDialog.showCancel) {
+        <button type="button" class="app-button app-button--secondary" (click)="cancel()">
+          {{ currentDialog.cancelText }}
+        </button>
+      }
       <button
         type="button"
         class="app-button"

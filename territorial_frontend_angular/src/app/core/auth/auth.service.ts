@@ -1,5 +1,7 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { Router } from '@angular/router';
+import { MsalService } from '@azure/msal-angular';
+import { AuthenticationResult } from '@azure/msal-browser';
 
 import { TERRITORIAL_APP_CONFIG } from '../config/territorial-app-config';
 import { AuthSession, AuthUser, UserRole } from '../models/auth.models';
@@ -34,6 +36,7 @@ const MOCK_USERS: Record<UserRole, AuthUser> = {
 export class AuthService {
   private readonly router = inject(Router);
   private readonly config = inject(TERRITORIAL_APP_CONFIG);
+  private readonly msalService = inject(MsalService);
   private readonly storedSession = this.readStoredSession();
 
   readonly accessToken = signal<string | null>(this.storedSession?.accessToken ?? null);
@@ -83,5 +86,53 @@ export class AuthService {
 
   private get storage(): Storage | null {
     return typeof localStorage === 'undefined' ? null : localStorage;
+  }
+
+  loginWithMicrosoft(role: 'Ciudadano' | 'Funcionario'): void {
+    sessionStorage.setItem('pendingRole', role);
+    this.msalService.loginRedirect({
+      scopes: ['openid', 'profile', 'email']
+    });
+  }
+
+  handleMicrosoftCallback(): void {
+    this.msalService.handleRedirectObservable().subscribe({
+      next: (result: AuthenticationResult | null) => {
+        if (!result) return;
+
+        const pendingRole = sessionStorage.getItem('pendingRole') as 'Ciudadano' | 'Funcionario' | null;
+        if (!pendingRole) return;
+
+        sessionStorage.removeItem('pendingRole');
+
+        const name = result.account?.name ?? result.account?.username ?? 'Usuario';
+        const email = result.account?.username ?? '';
+        const initials = name
+          .split(' ')
+          .map((n: string) => n[0])
+          .slice(0, 2)
+          .join('')
+          .toUpperCase();
+
+        this.setSession({
+          accessToken: result.accessToken,
+          user: {
+            id: 0,
+            name,
+            email,
+            role: pendingRole,
+            initials
+          }
+        });
+
+        void this.router.navigateByUrl('/dashboard');
+      },
+      error: (err) => console.error('Microsoft login error:', err)
+    });
+  }
+
+  logoutMicrosoft(): void {
+    this.logout();
+    this.msalService.logoutRedirect();
   }
 }

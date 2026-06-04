@@ -40,19 +40,19 @@ export const routes: Routes = [
       },
       {
         path: 'admin/entidades',
-        loadComponent: () => import('./features/entities/entities-list.component').then((c) => c.EntitiesListComponent)
+        loadComponent: () => import('./features/entities/entities-list-generic.component').then((c) => c.EntitiesListGenericComponent)
       },
       {
         path: 'admin/funcionarios',
-        loadComponent: () => import('./features/officials/officials-list.component').then((c) => c.OfficialsListComponent)
+        loadComponent: () => import('./features/officials/officials-list-generic.component').then((c) => c.OfficialsListGenericComponent)
       },
       {
         path: 'admin/ciudadanos',
-        loadComponent: () => import('./features/citizens/citizens-list.component').then((c) => c.CitizensListComponent)
+        loadComponent: () => import('./features/citizens/citizens-list-generic.component').then((c) => c.CitizensListGenericComponent)
       },
       {
         path: 'admin/categorias',
-        loadComponent: () => import('./features/categories/categories-list.component').then((c) => c.CategoriesListComponent)
+        loadComponent: () => import('./features/categories/categories-list-generic.component').then((c) => c.CategoriesListGenericComponent)
       },
       {
         path: 'territorios/comunas',

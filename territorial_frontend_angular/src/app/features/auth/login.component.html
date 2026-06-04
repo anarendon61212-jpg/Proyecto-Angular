@@ -4,25 +4,86 @@
       <span class="login-card__mark">◆</span>
       <span>
         <strong>Valoración Territorial</strong>
-        <small>Plantilla inicial conectada al backend Flask</small>
+        Municipio de Manizales
       </span>
     </div>
 
     <div>
-      <p class="eyebrow">Autenticación temporal</p>
-      <h1>Elige un rol para entrar</h1>
-      <p class="description">
-        Este login simula la sesión mientras se implementan OAuth y emisión de token en el backend.
-      </p>
+      <p class="eyebrow">Administrador</p>
+      <h1>Acceso Sistema</h1>
+
+      <div class="form-group">
+        <label>Correo</label>
+        <input
+          type="email"
+          [value]="adminEmail()"
+          (input)="adminEmail.set($any($event.target).value)"
+          placeholder="admin@manizales.gov.co"
+        />
+      </div>
+
+      <div class="form-group">
+        <label>Contraseña</label>
+        <input
+          type="password"
+          [value]="adminPassword()"
+          (input)="adminPassword.set($any($event.target).value)"
+          placeholder="••••••••"
+        />
+      </div>
+
+      @if (adminError()) {
+        <div class="error-message">{{ adminError() }}</div>
+      }
+
+      <button (click)="loginAdmin()" class="btn btn-primary btn-block">
+        Iniciar sesión
+      </button>
     </div>
 
-    <div class="role-grid">
-      @for (role of roles; track role) {
-        <button class="role-card" type="button" (click)="login(role)">
-          <span>{{ roleInitial(role) }}</span>
-          <strong>{{ role }}</strong>
-          <small>Entrar como {{ role.toLowerCase() }}</small>
+    <div class="divider">o</div>
+
+    <div>
+      <p class="eyebrow">Ciudadanos y Funcionarios</p>
+      <h2>Selecciona tu rol</h2>
+      <p class="description">
+        Elige tu rol antes de continuar con tu cuenta Microsoft
+      </p>
+
+      <div class="role-grid">
+        <button
+          class="role-card"
+          type="button"
+          (click)="selectMicrosoftRole('Ciudadano')"
+          [class.active]="selectedMicrosoftRole() === 'Ciudadano'"
+        >
+          <span class="initials">CI</span>
+          <strong>Ciudadano</strong>
+          <small>Acceso ciudadano</small>
         </button>
+
+        <button
+          class="role-card"
+          type="button"
+          (click)="selectMicrosoftRole('Funcionario')"
+          [class.active]="selectedMicrosoftRole() === 'Funcionario'"
+        >
+          <span class="initials">FU</span>
+          <strong>Funcionario</strong>
+          <small>Acceso funcionario</small>
+        </button>
+      </div>
+
+      <button
+        (click)="loginWithMicrosoft()"
+        [disabled]="!selectedMicrosoftRole()"
+        class="btn btn-primary btn-block"
+      >
+        Iniciar sesión con Microsoft
+      </button>
+
+      @if (!selectedMicrosoftRole()) {
+        <p class="help-text">Selecciona un rol para habilitar este botón</p>
       }
     </div>
   </section>

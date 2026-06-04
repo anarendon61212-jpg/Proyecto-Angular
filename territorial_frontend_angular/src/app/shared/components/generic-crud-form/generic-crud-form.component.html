@@ -1,0 +1,145 @@
+<form [formGroup]="form" (ngSubmit)="onSubmit()" class="generic-form">
+  @if (duplicateError) {
+    <div class="error-banner">
+      {{ duplicateError }}
+    </div>
+  }
+
+  @for (field of config.fields; track field.key) {
+    @if (field.type !== 'file') {
+      <div class="form-group">
+        <label [for]="field.key">
+          {{ field.label }}
+          @if (isFieldRequired(field)) {
+            <span class="required">*</span>
+          }
+        </label>
+
+        @switch (field.type) {
+          @case ('text') {
+            <input
+              [id]="field.key"
+              type="text"
+              [formControlName]="field.key"
+              [placeholder]="field.placeholder || ''"
+              class="form-input"
+              [class.is-invalid]="form.get(field.key)?.invalid && form.get(field.key)?.touched"
+            />
+          }
+          @case ('email') {
+            <input
+              [id]="field.key"
+              type="email"
+              [formControlName]="field.key"
+              [placeholder]="field.placeholder || ''"
+              class="form-input"
+              [class.is-invalid]="form.get(field.key)?.invalid && form.get(field.key)?.touched"
+            />
+          }
+          @case ('tel') {
+            <input
+              [id]="field.key"
+              type="tel"
+              [formControlName]="field.key"
+              [placeholder]="field.placeholder || ''"
+              class="form-input"
+              [class.is-invalid]="form.get(field.key)?.invalid && form.get(field.key)?.touched"
+            />
+          }
+          @case ('number') {
+            <input
+              [id]="field.key"
+              type="number"
+              [formControlName]="field.key"
+              [placeholder]="field.placeholder || ''"
+              class="form-input"
+              [class.is-invalid]="form.get(field.key)?.invalid && form.get(field.key)?.touched"
+            />
+          }
+          @case ('textarea') {
+            <textarea
+              [id]="field.key"
+              [formControlName]="field.key"
+              [placeholder]="field.placeholder || ''"
+              class="form-input"
+              rows="4"
+              [class.is-invalid]="form.get(field.key)?.invalid && form.get(field.key)?.touched"
+            ></textarea>
+          }
+          @case ('select') {
+            <select
+              [id]="field.key"
+              [formControlName]="field.key"
+              class="form-input"
+              [class.is-invalid]="form.get(field.key)?.invalid && form.get(field.key)?.touched"
+            >
+              <option [ngValue]="''">Selecciona una opción</option>
+              @for (option of getSelectOptions(field); track option.value) {
+                <option [ngValue]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          }
+        }
+
+        @if (form.get(field.key)?.invalid && form.get(field.key)?.touched) {
+          <span class="error-text">{{ getFieldError(field.key) }}</span>
+        }
+        @if (field.hint) {
+          <span class="hint-text">{{ field.hint }}</span>
+        }
+      </div>
+    }
+  }
+
+  <!-- File upload field -->
+  @if (config.hasFile && config.fileField) {
+    @let fileField = config.fields.find(f => f.key === config.fileField);
+    @if (fileField) {
+      <div class="form-group">
+        <label>
+          {{ fileField.label }}
+          @if (isFieldRequired(fileField)) {
+            <span class="required">*</span>
+          }
+        </label>
+
+        @if (previewUrls.get(config.fileField)) {
+          <div class="file-preview">
+            <img [src]="previewUrls.get(config.fileField)" [alt]="fileField.label + ' preview'" />
+          </div>
+        }
+
+        <app-file-upload
+          [accept]="'image/png,image/jpeg,image/jpg,image/webp'"
+          [maxSizeMb]="2"
+          [label]="fileField.hint || fileField.placeholder || 'Arrastra archivo aquí'"
+          hint="o haz clic para seleccionar"
+          (filesSelected)="onFileSelected($event, config.fileField!)"
+          (invalidFiles)="onInvalidFiles($event)"
+        ></app-file-upload>
+      </div>
+    }
+  }
+
+  <div class="form-actions">
+    <button
+      type="button"
+      (click)="onCancel()"
+      class="btn btn-secondary"
+      [disabled]="isSubmitting"
+    >
+      Cancelar
+    </button>
+    <button
+      type="submit"
+      class="btn btn-primary"
+      [disabled]="form.invalid || isSubmitting"
+    >
+      @if (isSubmitting) {
+        Guardando...
+      } @else {
+        {{ item ? 'Actualizar' : 'Crear' }}
+      }
+    </button>
+  </div>
+</form>

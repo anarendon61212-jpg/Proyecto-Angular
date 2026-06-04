@@ -207,4 +207,4 @@ export const TERRITORIAL_RESOURCES = {
   reports: 'reports'
 } as const;
 
-export type TerritorialResourcePath = (typeof TERRITORIAL_RESOURCES)[keyof typeof TERRITORIAL_RESOURCES];
+export type TerritorialResourcePath = (typeof TERRITORIAL_RESOURCES)[keyof typeof TERRITORIAL_RESOURCES]
