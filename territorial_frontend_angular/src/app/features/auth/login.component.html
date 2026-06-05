@@ -1,112 +1,151 @@
 <main class="login-page">
-  <section class="login-card app-card">
-    <div class="login-card__brand">
-      <span class="login-card__mark">◆</span>
-      <span>
-        <strong>Valoración Territorial</strong>
-        Municipio de Manizales
-      </span>
+  <section class="login-container">
+    <!-- Header -->
+    <div class="login-header">
+      <div class="login-brand">
+        <span class="login-brand__mark">◆</span>
+        <div>
+          <strong>Valoración Territorial</strong>
+          <small>Municipio de Manizales</small>
+        </div>
+      </div>
+      <h1>Bienvenido al Sistema</h1>
+      <p class="login-subtitle">Selecciona tu tipo de acceso para continuar</p>
     </div>
 
-    <div>
-      <p class="eyebrow">Administrador</p>
-      <h1>Acceso Sistema</h1>
+    <!-- Login Methods Grid -->
+    <div class="login-methods">
 
-      <div class="form-group">
-        <label>Correo</label>
-        <input
-          type="email"
-          [value]="adminEmail()"
-          (input)="adminEmail.set($any($event.target).value)"
-          placeholder="admin@manizales.gov.co"
-        />
+      <!-- Method 1: Administrator Login -->
+      <div class="login-method-card">
+        <div class="method-header">
+          <span class="method-icon admin-icon">👤</span>
+          <h2>Acceso Administrador</h2>
+        </div>
+        <p class="method-description">Ingresa con credenciales de administrador del sistema</p>
+
+        <form class="method-form" (ngSubmit)="loginAdmin()">
+          <div class="form-group">
+            <label for="admin-email">Correo</label>
+            <input
+              id="admin-email"
+              type="email"
+              [value]="adminEmail()"
+              (input)="adminEmail.set($any($event.target).value)"
+              placeholder="admin@manizales.gov.co"
+              class="form-input"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="admin-password">Contraseña</label>
+            <input
+              id="admin-password"
+              type="password"
+              [value]="adminPassword()"
+              (input)="adminPassword.set($any($event.target).value)"
+              placeholder="••••••••"
+              class="form-input"
+            />
+          </div>
+
+          @if (adminError()) {
+            <div class="alert alert-error">
+              <span class="alert-icon">⚠️</span>
+              <span>{{ adminError() }}</span>
+            </div>
+          }
+
+          <button type="submit" class="btn btn-primary btn-block">
+            Iniciar sesión
+          </button>
+        </form>
       </div>
 
-      <div class="form-group">
-        <label>Contraseña</label>
-        <input
-          type="password"
-          [value]="adminPassword()"
-          (input)="adminPassword.set($any($event.target).value)"
-          placeholder="••••••••"
-        />
-      </div>
+      <!-- Method 2: GitHub OAuth -->
+      <div class="login-method-card">
+        <div class="method-header">
+          <span class="method-icon github-icon">
+            <svg viewBox="0 0 24 24" role="img" aria-label="GitHub">
+              <path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.5v-1.9c-2.78.62-3.37-1.21-3.37-1.21-.45-1.2-1.11-1.52-1.11-1.52-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.35 1.12 2.92.86.09-.66.35-1.12.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.93c.85 0 1.7.12 2.5.34 1.9-1.33 2.74-1.05 2.74-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.8-4.57 5.06.36.32.68.94.68 1.9v2.81c0 .28.18.6.69.5A10.13 10.13 0 0 0 22 12.25C22 6.58 17.52 2 12 2Z" />
+            </svg>
+          </span>
+          <h2>Acceso con GitHub</h2>
+        </div>
+        <p class="method-description">Valida tu identidad usando tu cuenta de GitHub</p>
 
-      @if (adminError()) {
-        <div class="error-message">{{ adminError() }}</div>
-      }
+        <div class="method-info">
+          <p>✓ OAuth 2.0 seguro</p>
+          <p>✓ Primera vez: elige tu rol (Ciudadano o Funcionario)</p>
+        </div>
 
-      <button (click)="loginAdmin()" class="btn btn-primary btn-block">
-        Iniciar sesión
-      </button>
-    </div>
-
-    <div class="divider">o</div>
-
-    <div>
-      <p class="eyebrow">GitHub</p>
-      <h2>Inicia sesion con OAuth</h2>
-      <p class="description">
-        GitHub validara tu identidad. Si es tu primera vez, podras elegir Ciudadano o Funcionario.
-      </p>
-
-      <button class="oauth-button oauth-button--github" type="button" (click)="loginWithGitHub()">
-        <span class="oauth-button__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" role="img">
+        <button (click)="loginWithGitHub()" class="btn btn-github btn-block">
+          <svg viewBox="0 0 24 24" class="btn-icon">
             <path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.5v-1.9c-2.78.62-3.37-1.21-3.37-1.21-.45-1.2-1.11-1.52-1.11-1.52-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.35 1.12 2.92.86.09-.66.35-1.12.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.93c.85 0 1.7.12 2.5.34 1.9-1.33 2.74-1.05 2.74-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.8-4.57 5.06.36.32.68.94.68 1.9v2.81c0 .28.18.6.69.5A10.13 10.13 0 0 0 22 12.25C22 6.58 17.52 2 12 2Z" />
           </svg>
-        </span>
-        <span>
-          <strong>Continuar con GitHub</strong>
-          <small>OAuth 2.0</small>
-        </span>
-      </button>
-    </div>
-
-    <div class="divider">o</div>
-
-    <div>
-      <p class="eyebrow">Ciudadanos y Funcionarios</p>
-      <h2>Selecciona tu rol</h2>
-      <p class="description">
-        Elige tu rol antes de continuar con tu cuenta Microsoft
-      </p>
-
-      <div class="role-grid">
-        <button
-          class="role-card"
-          type="button"
-          (click)="selectMicrosoftRole('Ciudadano')"
-          [class.active]="selectedMicrosoftRole() === 'Ciudadano'"
-        >
-          <span class="initials">CI</span>
-          <strong>Ciudadano</strong>
-          <small>Acceso ciudadano</small>
-        </button>
-
-        <button
-          class="role-card"
-          type="button"
-          (click)="selectMicrosoftRole('Funcionario')"
-          [class.active]="selectedMicrosoftRole() === 'Funcionario'"
-        >
-          <span class="initials">FU</span>
-          <strong>Funcionario</strong>
-          <small>Acceso funcionario</small>
+          Continuar con GitHub
         </button>
       </div>
 
-      <button
-        (click)="loginWithMicrosoft()"
-        [disabled]="!selectedMicrosoftRole()"
-        class="btn btn-primary btn-block"
-      >
-        Iniciar sesión con Microsoft
-      </button>
+      <!-- Method 3: Microsoft / Role Selection -->
+      <div class="login-method-card">
+        <div class="method-header">
+            <span class="method-icon microsoft-icon">👥</span>
+            <h2>Acceso con Microsoft</h2>
+          </div>
+        <p class="method-description">Selecciona tu rol y accede con tu cuenta Microsoft</p>
 
-      @if (!selectedMicrosoftRole()) {
-        <p class="help-text">Selecciona un rol para habilitar este botón</p>
-      }
+        <div class="role-selection">
+          <p class="role-instruction">Elige tu tipo de acceso:</p>
+
+          <div class="role-options">
+            <button
+              type="button"
+              class="role-option"
+              (click)="selectMicrosoftRole('Ciudadano')"
+              [class.active]="selectedMicrosoftRole() === 'Ciudadano'"
+            >
+              <span class="role-badge">CI</span>
+              <div class="role-content">
+                <strong>Ciudadano</strong>
+                <small>Acceso como ciudadano</small>
+              </div>
+              @if (selectedMicrosoftRole() === 'Ciudadano') {
+                <span class="role-check">✓</span>
+              }
+            </button>
+
+            <button
+              type="button"
+              class="role-option"
+              (click)="selectMicrosoftRole('Funcionario')"
+              [class.active]="selectedMicrosoftRole() === 'Funcionario'"
+            >
+              <span class="role-badge fu">FU</span>
+              <div class="role-content">
+                <strong>Funcionario</strong>
+                <small>Acceso como funcionario</small>
+              </div>
+              @if (selectedMicrosoftRole() === 'Funcionario') {
+                <span class="role-check">✓</span>
+              }
+            </button>
+          </div>
+        </div>
+
+        <button
+          (click)="loginWithMicrosoft()"
+          [disabled]="!selectedMicrosoftRole()"
+          class="btn btn-microsoft btn-block"
+        >
+          Iniciar sesión con Microsoft
+        </button>
+
+        @if (!selectedMicrosoftRole()) {
+          <p class="help-text">⚠️ Selecciona un rol para continuar</p>
+        }
+      </div>
+
     </div>
   </section>
 </main>
