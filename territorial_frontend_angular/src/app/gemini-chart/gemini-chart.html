@@ -1,0 +1,40 @@
+<div style="text-align:center; padding: 20px;">
+  <h2>Estadísticas Territoriales (Gemini)</h2>
+
+  <div *ngIf="loading" style="padding: 12px; text-align:center; color:#555;">
+    Cargando estadísticas... ⏳
+  </div>
+
+  <div id="chart" style="display: flex; justify-content: center;">
+    <apx-chart
+      #chart
+      [series]="chartOptions.series"
+      [chart]="chartOptions.chart"
+      [labels]="chartOptions.labels"
+      [xaxis]="chartOptions.xaxis"
+      [responsive]="chartOptions.responsive"
+    ></apx-chart>
+  </div>
+
+  <div style="margin-top: 24px; display:flex; flex-direction:column; gap:12px; align-items:center;">
+    <label for="geminiQuery" style="font-weight:600;">Pregunta a Gemini para generar una gráfica</label>
+    <textarea
+      id="geminiQuery"
+      [(ngModel)]="queryText"
+      rows="4"
+      style="width:100%; max-width:600px; min-width:260px; padding:12px; border:1px solid #ccc; border-radius:8px; font-size:14px;"
+      placeholder="Describe lo que quieres ver, por ejemplo: mostrar la proporción de anotaciones por categoría"
+    ></textarea>
+    <button
+      type="button"
+      (click)="submitQuery()"
+      style="width:180px; padding:12px 16px; border:none; border-radius:8px; background:#1459f5; color:white; cursor:pointer; font-weight:600;"
+    >
+      Generar gráfica
+    </button>
+
+    <div *ngIf="errorMessage" style="width:100%; max-width:600px; color:#a00; background:#fee; border:1px solid #fbb; border-radius:8px; padding:12px; text-align:left;">
+      <strong>Error:</strong> {{ errorMessage }}
+    </div>
+  </div>
+</div>

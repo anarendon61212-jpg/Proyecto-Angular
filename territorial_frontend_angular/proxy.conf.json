@@ -5,6 +5,15 @@
     "changeOrigin": true,
     "logLevel": "debug"
   },
+  "/api/reports": {
+    "target": "http://127.0.0.1:5000",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "debug",
+    "pathRewrite": {
+      "^/api/reports": "/reports"
+    }
+  },
   "/health": {
     "target": "http://127.0.0.1:5000",
     "secure": false,

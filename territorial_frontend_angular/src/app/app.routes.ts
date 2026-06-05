@@ -48,6 +48,12 @@ export const routes: Routes = [
         path: 'reportes',
         loadComponent: () => import('./features/reports/reports.component').then((component) => component.ReportsComponent)
       },
+      // 👇 AQUÍ AGREGAMOS LA NUEVA RUTA PARA TU GRÁFICA 👇
+      {
+        path: 'estadisticas',
+        loadComponent: () => import('./gemini-chart/gemini-chart').then((c) => c.GeminiChartComponent)
+      },
+      // 👆 --------------------------------------------- 👆
       {
         path: 'admin/entidades',
         loadComponent: () => import('./features/entities/entities-list-generic.component').then((c) => c.EntitiesListGenericComponent)

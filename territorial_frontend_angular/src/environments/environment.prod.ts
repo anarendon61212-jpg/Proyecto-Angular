@@ -2,8 +2,8 @@ export const environment = {
   production: true,
   appConfig: {
     appName: 'Valoración Territorial',
-    apiBaseUrl: '/api',
-    backendHealthUrl: '/health',
+    apiBaseUrl: 'http://127.0.0.1:5000',
+    backendHealthUrl: 'http://127.0.0.1:5000/health',
     tokenStorageKey: 'territorial.auth.session',
     oauthStateStorageKey: 'territorial.oauth.state',
     oauthRedirectStorageKey: 'territorial.oauth.redirect',
