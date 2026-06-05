@@ -5,6 +5,16 @@ export const environment = {
     apiBaseUrl: '/api',
     backendHealthUrl: '/health',
     tokenStorageKey: 'territorial.auth.session',
+    oauthStateStorageKey: 'territorial.oauth.state',
+    oauthRedirectStorageKey: 'territorial.oauth.redirect',
+    oauthProfileStorageKey: 'territorial.oauth.github.profile',
+    oauthLocalFallbackEnabled: true,
+    githubOAuth: {
+      clientId: 'Ov23liAomk3Fm3g5yozs',
+      authorizeUrl: 'https://github.com/login/oauth/authorize',
+      callbackPath: '/auth/oauth/github/callback',
+      scope: 'read:user user:email'
+    },
     defaultPageSize: 10
   }
 };

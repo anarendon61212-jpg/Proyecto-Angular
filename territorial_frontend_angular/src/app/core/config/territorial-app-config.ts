@@ -7,6 +7,16 @@ export interface TerritorialAppConfig {
   apiBaseUrl: string;
   backendHealthUrl: string;
   tokenStorageKey: string;
+  oauthStateStorageKey: string;
+  oauthRedirectStorageKey: string;
+  oauthProfileStorageKey: string;
+  oauthLocalFallbackEnabled: boolean;
+  githubOAuth: {
+    clientId: string;
+    authorizeUrl: string;
+    callbackPath: string;
+    scope: string;
+  };
   defaultPageSize: number;
 }
 

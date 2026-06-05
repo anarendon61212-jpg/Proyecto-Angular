@@ -47,6 +47,12 @@ export class LoginComponent implements OnInit {
     this.authService.loginWithMicrosoft(role);
   }
 
+  loginWithGitHub(): void {
+    const redirectTo =
+      this.route.snapshot.queryParamMap.get('redirectTo') || '/dashboard';
+    this.authService.loginWithGitHub(redirectTo);
+  }
+
   selectMicrosoftRole(role: 'Ciudadano' | 'Funcionario'): void {
     this.selectedMicrosoftRole.set(role);
   }

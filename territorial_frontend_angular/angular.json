@@ -79,7 +79,7 @@
             },
             "development": {
               "buildTarget": "territorial-frontend-angular:build:development",
-              "proxyConfig": "proxy.conf.json"
+              "proxyConfig": "proxy.conf.cjs"
             }
           },
           "defaultConfiguration": "development"

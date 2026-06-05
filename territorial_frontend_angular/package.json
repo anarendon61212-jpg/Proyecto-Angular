@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "ng serve --open",
+    "start": "node tools/start-dev.mjs",
+    "start:angular": "ng serve --open",
+    "start:oauth": "node tools/github-oauth-dev-server.mjs",
     "build": "ng build",
     "watch": "ng build --watch --configuration development"
   },

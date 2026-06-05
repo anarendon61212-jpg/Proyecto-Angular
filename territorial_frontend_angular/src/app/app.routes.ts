@@ -12,6 +12,16 @@ export const routes: Routes = [
       import('./features/auth/login.component').then((component) => component.LoginComponent)
   },
   {
+    path: 'auth/oauth/github/callback',
+    loadComponent: () =>
+      import('./features/auth/oauth-callback.component').then((component) => component.OAuthCallbackComponent)
+  },
+  {
+    path: 'auth/completar-perfil',
+    loadComponent: () =>
+      import('./features/auth/complete-profile.component').then((component) => component.CompleteProfileComponent)
+  },
+  {
     path: '',
     component: AppShellComponent,
     canActivate: [authGuard],
