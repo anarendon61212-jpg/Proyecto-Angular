@@ -28,11 +28,23 @@ module.exports = {
     changeOrigin: true,
     logLevel: 'debug'
   },
+  '/api/reports': {
+    target: 'http://127.0.0.1:5000',
+    secure: false,
+    changeOrigin: true,
+    logLevel: 'debug',
+    pathRewrite: {
+      '^/api/reports': '/reports'
+    }
+  },
   '/api': {
     target: 'http://127.0.0.1:5000',
     secure: false,
     changeOrigin: true,
-    logLevel: 'debug'
+    logLevel: 'debug',
+    pathRewrite: {
+      '^/api': '/api'
+    }
   },
   '/health': {
     target: 'http://127.0.0.1:5000',

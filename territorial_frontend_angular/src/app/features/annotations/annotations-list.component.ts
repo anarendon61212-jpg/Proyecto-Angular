@@ -517,11 +517,21 @@ export class AnnotationsListComponent {
 
   private loadData(): void {
     forkJoin({
-      annotations: this.annotationService.listCollection(),
-      categories: this.categoryService.listCollection(),
-      neighborhoods: this.neighborhoodService.listCollection(),
-      citizens: this.citizenService.listCollection(),
-      entities: this.entityService.listCollection()
+      annotations: this.annotationService.listCollection().pipe(
+        catchError(() => of({ items: [], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+      ),
+      categories: this.categoryService.listCollection().pipe(
+        catchError(() => of({ items: [], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+      ),
+      neighborhoods: this.neighborhoodService.listCollection().pipe(
+        catchError(() => of({ items: [], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+      ),
+      citizens: this.citizenService.listCollection().pipe(
+        catchError(() => of({ items: [], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+      ),
+      entities: this.entityService.listCollection().pipe(
+        catchError(() => of({ items: [], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+      )
     }).subscribe(({ annotations, categories, neighborhoods, citizens, entities }) => {
       this.annotations = annotations.items;
       this.filteredAnnotations = [...this.annotations];

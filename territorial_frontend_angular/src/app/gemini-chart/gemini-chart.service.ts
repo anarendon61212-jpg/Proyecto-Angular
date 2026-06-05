@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { Observable } from 'rxjs';
+import { catchError, Observable, of } from 'rxjs';
 
 import { ApiClient } from '../core/api/api-client.service';
 
@@ -22,10 +22,22 @@ export class GeminiChartService {
   constructor(private apiClient: ApiClient) {}
 
   getSampleChartData(): Observable<GeminiChartData> {
-    return this.apiClient.get<ReportResponse>('reports/test/pie');
+    return this.apiClient.get<ReportResponse>('reports/test/pie').pipe(
+      catchError(() => of(this.getFallbackChartData()))
+    );
   }
 
   getChartData(query: string): Observable<GeminiChartData> {
-    return this.apiClient.create<ReportResponse>('reports', { query });
+    return this.apiClient.create<ReportResponse>('reports', { query }).pipe(
+      catchError(() => of(this.getFallbackChartData()))
+    );
+  }
+
+  private getFallbackChartData(): GeminiChartData {
+    return {
+      type: 'pie',
+      labels: ['Sin datos', 'Datos de ejemplo', 'No disponible'],
+      series: [1, 2, 3]
+    };
   }
 }
