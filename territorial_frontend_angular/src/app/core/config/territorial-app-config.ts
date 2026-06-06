@@ -17,6 +17,11 @@ export interface TerritorialAppConfig {
     callbackPath: string;
     scope: string;
   };
+  googleOAuth: {
+    clientId: string;
+    callbackPath: string;
+    scope: string;
+  };
   defaultPageSize: number;
 }
 

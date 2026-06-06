@@ -64,11 +64,6 @@ export class AppShellComponent {
   }
 
   logout(): void {
-    const role = this.authService.currentRole();
-    if (role === 'Ciudadano' || role === 'Funcionario') {
-      this.authService.logoutMicrosoft();
-    } else {
-      this.authService.logout();
-    }
+    this.authService.logout();
   }
 }

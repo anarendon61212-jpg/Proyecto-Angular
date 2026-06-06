@@ -84,20 +84,76 @@ export class OAuthCallbackComponent implements OnInit {
   private readonly toastService = inject(ToastService);
 
   readonly title = signal('Validando autenticacion');
-  readonly message = signal('Estamos confirmando tu identidad con GitHub.');
+  readonly message = signal('Estamos confirmando tu identidad.');
   readonly canRetry = signal(false);
 
   ngOnInit(): void {
+    const urlSegments = this.route.snapshot.url.map(segment => segment.path);
+    const provider = urlSegments.includes('google') ? 'google' : 'github';
+    
+    this.message.set(`Estamos confirmando tu identidad con ${provider === 'google' ? 'Google' : 'GitHub'}.`);
+
     const queryParams = this.route.snapshot.queryParamMap;
+    const fragment = this.route.snapshot.fragment;
     const providerError = queryParams.get('error');
     const code = queryParams.get('code');
     const state = queryParams.get('state');
 
+    console.log('OAuth Callback Debug:', { provider, hasFragment: !!fragment, hasCode: !!code, hasState: !!state, fragment, code, state });
+
     if (providerError) {
-      this.showError('GitHub rechazo la autenticacion. Puedes intentarlo nuevamente.');
+      this.showError(`${provider === 'google' ? 'Google' : 'GitHub'} rechazo la autenticacion. Puedes intentarlo nuevamente.`);
       return;
     }
 
+    // For Google with token flow, the token is in the URL fragment
+    if (provider === 'google') {
+      if (fragment) {
+        const params = new URLSearchParams(fragment);
+        const accessToken = params.get('access_token');
+        const fragmentState = params.get('state');
+        const fragmentError = params.get('error');
+        
+        console.log('Google Token Flow Debug:', { accessToken, fragmentState, fragmentError });
+        
+        if (fragmentError) {
+          this.showError(`Google rechazo la autenticacion: ${fragmentError}`);
+          return;
+        }
+        
+        if (!accessToken || !fragmentState) {
+          this.showError('Google no retorno los datos necesarios para iniciar sesion.');
+          return;
+        }
+        
+        try {
+          this.authService.completeGoogleLogin(accessToken, fragmentState).pipe(
+            catchError((error: unknown) => {
+              console.error('Google login error:', error);
+              this.showError(this.oauthErrorMessage(error, provider));
+              return EMPTY;
+            })
+          ).subscribe((result) => {
+            if (result.session) {
+              this.toastService.success('Sesion iniciada', `Tu cuenta de Google fue validada correctamente.`);
+              void this.router.navigateByUrl(this.authService.getOAuthRedirectTo());
+              return;
+            }
+            this.showError(result.message || 'La respuesta no contiene una sesion valida.');
+          });
+          return;
+        } catch (error) {
+          console.error('Google login catch error:', error);
+          this.showError('No se pudo validar la solicitud OAuth. Intenta iniciar sesion otra vez.');
+          return;
+        }
+      } else {
+        this.showError('Google no retorno el token de acceso. Por favor intenta nuevamente.');
+        return;
+      }
+    }
+
+    // GitHub flow
     if (!code || !state) {
       this.showError('GitHub no retorno los datos necesarios para iniciar sesion.');
       return;
@@ -106,12 +162,12 @@ export class OAuthCallbackComponent implements OnInit {
     try {
       this.authService.completeGitHubLogin(code, state).pipe(
         catchError((error: unknown) => {
-          this.showError(this.oauthErrorMessage(error));
+          this.showError(this.oauthErrorMessage(error, provider));
           return EMPTY;
         })
       ).subscribe((result) => {
         if (result.session) {
-          this.toastService.success('Sesion iniciada', 'Tu cuenta de GitHub fue validada correctamente.');
+          this.toastService.success('Sesion iniciada', `Tu cuenta de GitHub fue validada correctamente.`);
           void this.router.navigateByUrl(this.authService.getOAuthRedirectTo());
           return;
         }
@@ -119,7 +175,7 @@ export class OAuthCallbackComponent implements OnInit {
         if (result.requiresProfile) {
           void this.router.navigate(['/auth/completar-perfil'], {
             queryParams: {
-              provider: result.profile?.provider ?? 'github',
+              provider: result.profile?.provider ?? provider,
               providerUserId: result.profile?.providerUserId,
               name: result.profile?.name,
               email: result.profile?.email
@@ -146,11 +202,11 @@ export class OAuthCallbackComponent implements OnInit {
     this.toastService.danger('Error de autenticacion', message);
   }
 
-  private oauthErrorMessage(error: unknown): string {
+  private oauthErrorMessage(error: unknown, provider: string = 'github'): string {
     if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
       return error.message;
     }
 
-    return 'No se pudo validar el token con GitHub.';
+    return `No se pudo validar el token con ${provider === 'google' ? 'Google' : 'GitHub'}.`;
   }
 }

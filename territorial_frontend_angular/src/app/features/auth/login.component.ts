@@ -22,6 +22,7 @@ export class LoginComponent implements OnInit {
   adminError = signal('');
 
   selectedMicrosoftRole = signal<'Ciudadano' | 'Funcionario' | null>(null);
+  selectedGoogleRole = signal<'Ciudadano' | 'Funcionario' | null>(null);
 
   ngOnInit(): void {
     this.authService.handleMicrosoftCallback();
@@ -53,7 +54,17 @@ export class LoginComponent implements OnInit {
     this.authService.loginWithGitHub(redirectTo);
   }
 
+  loginWithGoogle(): void {
+    const role = this.selectedGoogleRole();
+    if (!role) return;
+    this.authService.loginWithGoogle(role);
+  }
+
   selectMicrosoftRole(role: 'Ciudadano' | 'Funcionario'): void {
     this.selectedMicrosoftRole.set(role);
+  }
+
+  selectGoogleRole(role: 'Ciudadano' | 'Funcionario'): void {
+    this.selectedGoogleRole.set(role);
   }
 }

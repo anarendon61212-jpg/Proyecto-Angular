@@ -147,6 +147,80 @@ export class AuthService {
     });
   }
 
+  loginWithGoogle(role: 'Ciudadano' | 'Funcionario'): void {
+    const state = this.createOAuthState();
+    this.storage?.setItem(this.config.oauthStateStorageKey, state);
+    this.storage?.setItem(this.config.oauthRedirectStorageKey, '/dashboard');
+    sessionStorage.setItem('pendingRole', role);
+
+    const authUrl = this.buildGoogleAuthorizeUrl(state);
+    window.location.href = authUrl;
+  }
+
+  completeGoogleLogin(accessToken: string, state: string): Observable<OAuthCallbackResult> {
+    const expectedState = this.storage?.getItem(this.config.oauthStateStorageKey);
+
+    if (!expectedState || expectedState !== state) {
+      throw new Error('No se pudo validar el estado de la autenticacion OAuth.');
+    }
+
+    const pendingRole = sessionStorage.getItem('pendingRole') as 'Ciudadano' | 'Funcionario' | null;
+    if (!pendingRole) {
+      throw new Error('No se encontró el rol pendiente.');
+    }
+
+    sessionStorage.removeItem('pendingRole');
+
+    // Fetch user info from Google using the access token
+    return this.http.get<any>('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    }).pipe(
+      map((userInfo) => ({
+        session: {
+          accessToken: accessToken,
+          user: {
+            id: 0,
+            name: userInfo.name || 'Usuario Google',
+            email: userInfo.email || '',
+            role: pendingRole,
+            initials: this.initialsFromName(userInfo.name || 'Usuario Google')
+          }
+        }
+      })),
+      tap((result) => {
+        this.clearOAuthState();
+        if (result.session) {
+          this.setSession(result.session);
+        }
+      }),
+      catchError((error: unknown) => {
+        console.error('Error fetching Google user info:', error);
+        // If fetching user info fails, create a session with default values
+        return of({
+          session: {
+            accessToken: accessToken,
+            user: {
+              id: 0,
+              name: 'Usuario Google',
+              email: '',
+              role: pendingRole,
+              initials: 'UG'
+            }
+          }
+        }).pipe(
+          tap((result) => {
+            this.clearOAuthState();
+            if (result.session) {
+              this.setSession(result.session);
+            }
+          })
+        );
+      })
+    );
+  }
+
   handleMicrosoftCallback(): void {
     this.msalService.handleRedirectObservable().subscribe({
       next: (result: AuthenticationResult | null) => {
@@ -259,6 +333,24 @@ export class AuthService {
     });
 
     return `${this.config.githubOAuth.authorizeUrl}?${params.toString()}`;
+  }
+
+  private buildGoogleAuthorizeUrl(state: string): string {
+    const params = new URLSearchParams({
+      client_id: this.config.googleOAuth.clientId,
+      redirect_uri: this.googleOAuthRedirectUri,
+      scope: this.config.googleOAuth.scope,
+      state,
+      response_type: 'token',
+      access_type: 'online',
+      prompt: 'select_account'
+    });
+
+    return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+  }
+
+  private get googleOAuthRedirectUri(): string {
+    return `${window.location.origin}${this.config.googleOAuth.callbackPath}`;
   }
 
   private get oauthRedirectUri(): string {

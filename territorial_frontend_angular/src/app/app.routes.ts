@@ -17,6 +17,11 @@ export const routes: Routes = [
       import('./features/auth/oauth-callback.component').then((component) => component.OAuthCallbackComponent)
   },
   {
+    path: 'auth/oauth/google/callback',
+    loadComponent: () =>
+      import('./features/auth/oauth-callback.component').then((component) => component.OAuthCallbackComponent)
+  },
+  {
     path: 'auth/completar-perfil',
     loadComponent: () =>
       import('./features/auth/complete-profile.component').then((component) => component.CompleteProfileComponent)

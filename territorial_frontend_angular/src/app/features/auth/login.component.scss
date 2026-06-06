@@ -91,6 +91,7 @@
   &:nth-child(1) { animation-delay: 0.1s; }
   &:nth-child(2) { animation-delay: 0.2s; }
   &:nth-child(3) { animation-delay: 0.3s; }
+  &:nth-child(4) { animation-delay: 0.4s; }
 
   &:hover {
     border-color: var(--color-primary);
@@ -134,6 +135,17 @@
 .microsoft-icon {
   background: linear-gradient(135deg, #00a4ef 0%, #7fbaff 100%);
   color: #ffffff;
+}
+
+.google-icon {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  color: #4285f4;
+
+  svg {
+    height: 28px;
+    width: 28px;
+  }
 }
 
 .method-header h2 {
@@ -299,6 +311,28 @@
   &:hover:not(:disabled) {
     background: linear-gradient(135deg, #0088cc 0%, #5fa8ff 100%);
     box-shadow: 0 8px 20px rgba(0, 164, 239, 0.3);
+    transform: translateY(-2px);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+}
+
+.btn-google {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  color: #4285f4;
+
+  .btn-icon {
+    height: 20px;
+    width: 20px;
+  }
+
+  &:hover:not(:disabled) {
+    background: #f8f9fa;
+    border-color: #4285f4;
+    box-shadow: 0 8px 20px rgba(66, 133, 244, 0.2);
     transform: translateY(-2px);
   }
 
