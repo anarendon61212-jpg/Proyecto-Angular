@@ -69,7 +69,7 @@ export const routes: Routes = [
       },
       {
         path: 'admin/ciudadanos',
-        loadComponent: () => import('./features/citizens/citizens-list-generic.component').then((c) => c.CitizensListGenericComponent)
+        loadComponent: () => import('./features/citizens/citizens-management.component').then((c) => c.CitizensManagementComponent)
       },
       {
         path: 'admin/categorias',

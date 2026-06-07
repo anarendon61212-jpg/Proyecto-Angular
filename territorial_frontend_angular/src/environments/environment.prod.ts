@@ -15,6 +15,11 @@ export const environment = {
       callbackPath: '/auth/oauth/github/callback',
       scope: 'read:user user:email'
     },
+    googleOAuth: {
+      clientId: '31250362360-i8rv2iaomic46bs9f2j6279vp10988bv.apps.googleusercontent.com',
+      callbackPath: '/auth/oauth/google/callback',
+      scope: 'openid profile email'
+    },
     defaultPageSize: 10
   }
 };
