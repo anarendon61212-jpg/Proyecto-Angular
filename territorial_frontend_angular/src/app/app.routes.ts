@@ -81,7 +81,7 @@ export const routes: Routes = [
       },
       {
         path: 'territorios/barrios',
-        loadComponent: () => import('./features/neighborhoods/neighborhoods-list.component').then((c) => c.NeighborhoodsListComponent)
+        loadComponent: () => import('./features/neighborhoods/neighborhoods-list-generic.component').then((c) => c.NeighborhoodsListGenericComponent)
       }
     ]
   },
