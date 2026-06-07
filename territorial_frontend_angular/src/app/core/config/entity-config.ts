@@ -26,6 +26,12 @@ export interface DependencyCheck {
   paramField: string;
   warningMessage: string;
 }
+
+export interface CascadingSelectConfig {
+  sourceField: string;
+  targetField: string;
+  filterField: string;
+}
  
 export interface EntityConfig {
   name: string;
@@ -38,6 +44,7 @@ export interface EntityConfig {
   searchEndpoint?: string;
   dependencyCheck?: DependencyCheck;
   dependencyChecks?: DependencyCheck[];
+  cascadingSelects?: CascadingSelectConfig[];
   /**
    * CU-02 FIX 1: Cuando la unicidad del recurso NO es por "name" sino por otro campo
    * (ej: Officials se valida por "email"), se puede omitir la comprobación previa de
@@ -388,9 +395,25 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
     idField: 'id_commune',
     hasFile: false,
     searchEndpoint: 'communes/search',
+    dependencyChecks: [
+      {
+        service: 'NeighborhoodCrudService',
+        endpoint: 'neighborhoods',
+        paramField: 'id_commune',
+        warningMessage: 'Existen barrios asociados a esta comuna'
+      }
+    ],
+    cascadingSelects: [
+      {
+        sourceField: 'id_department',
+        targetField: 'id_city',
+        filterField: 'id_department'
+      }
+    ],
     columns: [
       { key: 'name', header: 'Nombre' },
-      { key: 'id_city', header: 'Ciudad' },
+      { key: 'id_department', header: 'Departamento', emptyValue: '—' },
+      { key: 'id_city', header: 'Ciudad', emptyValue: '—' },
       { key: 'status', header: 'Estado' }
     ],
     fields: [
@@ -401,6 +424,13 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
         required: true,
         placeholder: 'Ej: Comuna Centro, Comuna Arboleda',
         minLength: 3
+      },
+      {
+        key: 'id_department',
+        label: 'Departamento',
+        type: 'select',
+        required: true,
+        options: [] // Será llenado dinámicamente
       },
       {
         key: 'id_city',

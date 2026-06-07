@@ -77,7 +77,7 @@ export const routes: Routes = [
       },
       {
         path: 'territorios/comunas',
-        loadComponent: () => import('./features/communes/communes-list.component').then((c) => c.CommunesListComponent)
+        loadComponent: () => import('./features/communes/communes-list-generic.component').then((c) => c.CommunesListGenericComponent)
       },
       {
         path: 'territorios/barrios',

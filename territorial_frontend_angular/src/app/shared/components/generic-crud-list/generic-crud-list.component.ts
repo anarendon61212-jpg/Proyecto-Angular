@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, Input, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnInit, Output, inject, signal } from '@angular/core';
 import { take } from 'rxjs';
  
 import { CrudResourceService, ApiCollection } from '@core/api/crud-resource.service';
@@ -75,6 +75,7 @@ interface DependencyCheckResult {
         [selectOptions]="formSelectOptions()"
         (saved)="onFormSaved($event)"
         (cancelled)="closeForm()"
+        (valueChanges)="onFormValueChanged($event)"
       ></app-generic-crud-form>
     </app-drawer-panel>
   `,
@@ -136,6 +137,8 @@ export class GenericCrudListComponent implements OnInit {
   @Input() set selectOptions(options: Record<string, any[]> | null | undefined) {
     this.formSelectOptions.set(options ?? {});
   }
+
+  @Output() formValueChanged = new EventEmitter<Record<string, any>>();
  
   readonly collection = signal<ApiCollection<any> | null>(null);
   readonly isFormOpen = signal(false);
@@ -187,6 +190,10 @@ export class GenericCrudListComponent implements OnInit {
   onFormSaved(item: any): void {
     this.closeForm();
     this.loadItems();
+  }
+
+  onFormValueChanged(formValues: Record<string, any>): void {
+    this.formValueChanged.emit(formValues);
   }
  
   private async onDelete(item: any): Promise<void> {

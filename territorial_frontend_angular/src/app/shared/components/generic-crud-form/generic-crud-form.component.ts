@@ -43,6 +43,7 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
  
   @Output() saved = new EventEmitter<any>();
   @Output() cancelled = new EventEmitter<void>();
+  @Output() valueChanges = new EventEmitter<Record<string, any>>();
  
   form!: FormGroup;
   selectedFiles: Map<string, File> = new Map();
@@ -52,6 +53,11 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
  
   ngOnInit(): void {
     this.initForm();
+    
+    // Emit value changes for cascading select logic
+    this.form.valueChanges.subscribe((value) => {
+      this.valueChanges.emit(value);
+    });
   }
  
   ngOnChanges(changes: SimpleChanges): void {
