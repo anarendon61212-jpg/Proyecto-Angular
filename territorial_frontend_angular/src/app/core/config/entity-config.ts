@@ -293,8 +293,23 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
     hasFile: true,
     fileField: 'file',
     searchEndpoint: 'categories/search',
+    dependencyChecks: [
+      {
+        service: 'CategoryCrudService',
+        endpoint: 'categories',
+        paramField: 'id_parent_category',
+        warningMessage: 'Existen subcategorías asociadas a esta categoría'
+      },
+      {
+        service: 'AnnotationCategoryCrudService',
+        endpoint: 'annotation-categories',
+        paramField: 'id_category',
+        warningMessage: 'Existen anotaciones asociadas a esta categoría'
+      }
+    ],
     columns: [
       { key: 'name', header: 'Nombre' },
+      { key: 'id_parent_category', header: 'Categoría Padre', emptyValue: '—' },
       { key: 'description', header: 'Descripción', emptyValue: '—' },
       { key: 'status', header: 'Estado' }
     ],
@@ -306,6 +321,14 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
         required: true,
         placeholder: 'Ej: Agua potable, Vías públicas',
         minLength: 3
+      },
+      {
+        key: 'id_parent_category',
+        label: 'Categoría Padre',
+        type: 'select',
+        required: false,
+        options: [], // Será llenado dinámicamente
+        hint: 'Selecciona una categoría padre para crear una subcategoría'
       },
       {
         key: 'description',
