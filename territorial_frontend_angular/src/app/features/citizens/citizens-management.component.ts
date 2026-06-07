@@ -77,6 +77,9 @@ const MANIZALES_CENTER: L.LatLngTuple = [5.0703, -75.5138];
             <label>
               Celular
               <input type="tel" formControlName="phone" placeholder="+57 3xx xxx xxxx" />
+              @if (showError('phone')) {
+                <span class="field-error">El celular es obligatorio.</span>
+              }
             </label>
 
             <label>
@@ -202,7 +205,7 @@ export class CitizensManagementComponent implements AfterViewInit, OnDestroy {
   readonly citizenForm = new FormGroup({
     name: new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.minLength(3)] }),
     email: new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.email] }),
-    phone: new FormControl('', { nonNullable: true }),
+    phone: new FormControl('', { nonNullable: true, validators: [Validators.required] }),
     address: new FormControl('', { nonNullable: true, validators: [Validators.required] }),
     latitude: new FormControl<number | null>(null, { validators: [Validators.required] }),
     longitude: new FormControl<number | null>(null, { validators: [Validators.required] }),
