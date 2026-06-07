@@ -1,13 +1,25 @@
+
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output, inject, OnChanges, OnInit, SimpleChanges } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  EventEmitter,
+  Input,
+  Output,
+  inject,
+  OnChanges,
+  OnInit,
+  SimpleChanges
+} from '@angular/core';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { take } from 'rxjs';
-
+ 
 import { CrudResourceService, ApiCollection } from '@core/api/crud-resource.service';
 import { ToastService } from '@shared/services/toast.service';
 import { FileUploadComponent } from '@shared/components/file-upload/file-upload.component';
 import { EntityConfig, EntityFieldConfig, buildValidators } from '@core/config/entity-config';
-
+ 
 @Component({
   selector: 'app-generic-crud-form',
   standalone: true,
@@ -19,42 +31,47 @@ import { EntityConfig, EntityFieldConfig, buildValidators } from '@core/config/e
 export class GenericCrudFormComponent implements OnInit, OnChanges {
   private readonly fb = inject(FormBuilder);
   private readonly toastService = inject(ToastService);
-
+  // FIX 1: Necesario para forzar re-render con OnPush después de operaciones async
+  // (el bloque catch y el finally corren fuera del ciclo de detección de Angular,
+  // por eso isSubmitting = false no se reflejaba en el template y el botón
+  // se quedaba en "Guardando..." indefinidamente)
+  private readonly cdr = inject(ChangeDetectorRef);
+ 
   @Input() config!: EntityConfig;
   @Input() crudService!: CrudResourceService<any>;
   @Input() item: any = null;
   @Input() selectOptions: Record<string, any[]> = {};
-
+ 
   @Output() saved = new EventEmitter<any>();
   @Output() cancelled = new EventEmitter<void>();
-
+ 
   form!: FormGroup;
   selectedFiles: Map<string, File> = new Map();
   previewUrls: Map<string, string> = new Map();
   isSubmitting = false;
   duplicateError = '';
-
+ 
   ngOnInit(): void {
     this.initForm();
   }
-
+ 
   ngOnChanges(changes: SimpleChanges): void {
     if (this.form && changes['selectOptions']) {
       this.normalizeSelectControls();
     }
   }
-
+ 
   private initForm(): void {
     const group: Record<string, any> = {};
-
+ 
     this.config.fields.forEach((field) => {
       const validators = buildValidators(field);
       const value = this.normalizeSelectValue(field, this.item?.[field.key] ?? '');
       group[field.key] = [value, validators];
     });
-
+ 
     this.form = this.fb.group(group);
-
+ 
     if (this.item && this.config.hasFile && this.config.fileField) {
       const fileField = this.config.fields.find((f) => f.key === this.config.fileField);
       if (fileField && this.item[`${this.config.fileField}_url`]) {
@@ -62,7 +79,7 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
       }
     }
   }
-
+ 
   onFileSelected(files: File[], fieldKey: string): void {
     if (files.length > 0) {
       this.selectedFiles.set(fieldKey, files[0]);
@@ -73,26 +90,29 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
       reader.readAsDataURL(files[0]);
     }
   }
-
+ 
   onInvalidFiles(fileNames: string[]): void {
     this.toastService.warning(
       'Archivos rechazados',
       `${fileNames.join(', ')} exceden el tamaño máximo de 2 MB`
     );
   }
-
+ 
   async onSubmit(): Promise<void> {
     if (this.form.invalid) {
       return;
     }
-
+ 
     this.isSubmitting = true;
     this.duplicateError = '';
+    // FIX 1: Notificar a OnPush al inicio para que el botón muestre "Guardando..." correctamente
+    this.cdr.markForCheck();
+ 
     let payload: Record<string, any> | FormData | null = null;
-
+ 
     try {
       const formValue = this.form.value;
-
+ 
       // Validación de duplicado solo en creación
       if (!this.item && this.config.searchEndpoint) {
         const nameField = this.config.fields.find((f) => f.key === 'name');
@@ -101,17 +121,19 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
           if (isDuplicate) {
             this.duplicateError = `Ya existe un ${this.config.label.toLowerCase()} con este nombre`;
             this.isSubmitting = false;
+            // FIX 1: Forzar re-render para que el banner de error aparezca con OnPush
+            this.cdr.markForCheck();
             return;
           }
         }
       }
-
+ 
       payload = this.config.hasFile ? this.buildFormData(formValue) : this.buildPayload(formValue);
       const result = await this.savePayload(payload);
       this.toastService.success(`${this.config.label} ${this.item ? 'actualizado' : 'creado'} correctamente`);
-
+ 
       this.saved.emit(result);
-    } catch (error) {
+    } catch (error: any) {
       const fallbackPayload = this.buildUnsupportedFieldFallbackPayload(error, payload);
       if (fallbackPayload) {
         try {
@@ -125,36 +147,80 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
           return;
         }
       }
-
-      this.toastService.danger('Error', this.getSaveErrorMessage(error));
-      console.error(error);
+ 
+      // FIX 2: Extraer el mensaje del backend correctamente.
+      // El interceptor (api-error.interceptor.ts) normaliza el HttpErrorResponse a ApiError:
+      // { status: number, message: string, details: unknown }
+      // y lo relanza con throwError(), así que el catch recibe el ApiError normalizado.
+      // El backend devuelve HTTP 400 con { "message": "El nombre de la entidad ya está registrado" }
+      // que el interceptor mapea a ApiError.message.
+      // extractBackendMessage() solo miraba error.error.message (estructura HttpErrorResponse cruda),
+      // pero aquí ya llega el ApiError, donde el mensaje está en error.message directamente.
+      const backendMessage = this.extractBackendMessage(error);
+      const errorMessage = this.getSaveErrorMessage(error);
+ 
+      // FIX 2: Si el backend responde con un 400, mostrar el mensaje en el banner del formulario
+      // además del toast, para que sea visible sin cerrar el formulario.
+      const status: number = (error as any)?.status ?? 0;
+      if (status === 400 && backendMessage) {
+        this.duplicateError = backendMessage;
+      }
+ 
+      this.toastService.danger('Error al guardar', errorMessage);
+      console.error('[GenericCrudForm] Error al guardar:', error);
     } finally {
       this.isSubmitting = false;
+      // FIX 1: Forzar re-render para que OnPush actualice el botón ("Guardando..." → "Crear")
+      // y muestre el banner de error después de cualquier respuesta async
+      this.cdr.markForCheck();
     }
   }
-
+ 
   onCancel(): void {
     this.cancelled.emit();
   }
-
+ 
+  /**
+   * FIX 2: checkDuplicate mejorado.
+   *
+   * El backend usa ILIKE %q% (búsqueda parcial por contenido).
+   * Problema: si el nombre almacenado es "Alcaldía" y el usuario escribe
+   * "Alcaldía de Manizales", el ILIKE busca registros cuyo name contenga
+   * "Alcaldía de Manizales" — no los encuentra porque "Alcaldía" no contiene
+   * esa cadena completa. Resultado: isDuplicate = false, el POST se ejecuta,
+   * y el backend responde 400 que antes no se manejaba correctamente.
+   *
+   * Solución: buscar con la primera palabra del nombre (más probable que el
+   * ILIKE devuelva coincidencias parciales), y luego aplicar comparación
+   * exacta sobre los resultados. Si el search falla, dejar pasar el POST:
+   * el backend tiene la validación definitiva (ahora manejada con FIX 2).
+   */
   private checkDuplicate(name: string, endpoint: string): Promise<boolean> {
+    // Usar la primera palabra para ampliar el rango del ILIKE
+    const searchTerm = name.trim().split(' ')[0] || name.trim();
+ 
     return new Promise((resolve) => {
       this.crudService
-        .search({ q: name })
+        .search({ q: searchTerm })
         .pipe(take(1))
         .subscribe({
           next: (response) => {
-            const items = Array.isArray(response) ? response : (response as any).items || [];
-            resolve(items.some((item: any) => item.name?.toLowerCase() === name.toLowerCase()));
+            const items: any[] = Array.isArray(response) ? response : (response as any).items ?? [];
+            const exists = items.some(
+              (item: any) => item.name?.trim().toLowerCase() === name.trim().toLowerCase()
+            );
+            resolve(exists);
           },
+          // Si el search falla, no bloqueamos: el backend validará al hacer POST
+          // y el nuevo manejo de errores en el catch mostrará el mensaje correctamente
           error: () => resolve(false)
         });
     });
   }
-
+ 
   private buildFormData(formValue: any): FormData {
     const formData = new FormData();
-
+ 
     this.config.fields.forEach((field) => {
       if (field.type === 'file') {
         const file = this.selectedFiles.get(field.key);
@@ -168,27 +234,27 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
         }
       }
     });
-
+ 
     return formData;
   }
-
+ 
   private buildPayload(formValue: any): Record<string, any> {
     const payload: Record<string, any> = {};
-
+ 
     this.config.fields.forEach((field) => {
       if (field.type === 'file') {
         return;
       }
-
+ 
       const value = formValue[field.key];
       if (value !== null && value !== undefined && value !== '') {
         payload[field.key] = value;
       }
     });
-
+ 
     return payload;
   }
-
+ 
   private savePayload(payload: Record<string, any> | FormData): Promise<any> {
     if (this.item) {
       const idValue = this.item[this.config.idField];
@@ -196,12 +262,12 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
         ? this.crudService.updateForm(idValue, payload as FormData).toPromise()
         : this.crudService.update(idValue, payload).toPromise();
     }
-
+ 
     return this.config.hasFile
       ? this.crudService.createForm(payload as FormData).toPromise()
       : this.crudService.create(payload).toPromise();
   }
-
+ 
   private buildUnsupportedFieldFallbackPayload(
     error: unknown,
     payload: Record<string, any> | FormData | null
@@ -210,7 +276,7 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
     if (!fallback || !payload || !this.isUnsupportedFieldError(error, fallback.fields)) {
       return null;
     }
-
+ 
     if (payload instanceof FormData) {
       const sanitized = new FormData();
       payload.forEach((value, key) => {
@@ -220,7 +286,7 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
       });
       return sanitized;
     }
-
+ 
     return Object.entries(payload).reduce<Record<string, any>>((sanitized, [key, value]) => {
       if (!fallback.fields.includes(key)) {
         sanitized[key] = value;
@@ -228,12 +294,12 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
       return sanitized;
     }, {});
   }
-
+ 
   private isUnsupportedFieldError(error: unknown, fields: string[]): boolean {
     const message = this.extractBackendMessage(error).toLowerCase();
     return message.includes('invalid keyword argument') && fields.some((field) => message.includes(field.toLowerCase()));
   }
-
+ 
   private normalizeSelectControls(): void {
     this.config.fields
       .filter((field) => field.type === 'select')
@@ -242,72 +308,94 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
         if (!control) {
           return;
         }
-
+ 
         const normalizedValue = this.normalizeSelectValue(field, control.value);
         if (normalizedValue !== control.value) {
           control.setValue(normalizedValue);
         }
       });
   }
-
+ 
   private normalizeSelectValue(field: EntityFieldConfig, value: any): any {
     if (field.type !== 'select' || value === null || value === undefined || value === '') {
       return value;
     }
-
+ 
     const matchingOption = this.getSelectOptions(field).find((option) => String(option.value) === String(value));
     return matchingOption ? matchingOption.value : value;
   }
-
+ 
   getFieldError(fieldKey: string): string {
     const control = this.form.get(fieldKey);
     const field = this.config.fields.find((f) => f.key === fieldKey);
-
+ 
     if (!field || !control?.invalid || !control.touched) {
       return '';
     }
-
+ 
     if (control.hasError('required')) return `${field.label} es requerido`;
     if (control.hasError('minlength')) return `Mínimo ${field.minLength} caracteres`;
     if (control.hasError('email')) return 'Correo inválido';
     if (control.hasError('pattern')) return `${field.label} tiene un formato inválido`;
-
+ 
     return '';
   }
-
+ 
   isFieldRequired(field: EntityFieldConfig): boolean {
     return field.required;
   }
-
+ 
   getSelectOptions(field: EntityFieldConfig): any[] {
     return this.selectOptions[field.key] || field.options || [];
   }
-
+ 
   private getSaveErrorMessage(error: unknown): string {
     const backendMessage = this.extractBackendMessage(error);
     const baseMessage = `No se pudo guardar el ${this.config.label.toLowerCase()}`;
-
+ 
     return backendMessage ? `${baseMessage}: ${backendMessage}` : baseMessage;
   }
-
+ 
+  /**
+   * FIX 2: extractBackendMessage mejorado.
+   *
+   * El interceptor api-error.interceptor.ts transforma el HttpErrorResponse en ApiError:
+   *   { status: number, message: string, details: unknown }
+   * y lo relanza. Por eso el catch recibe un objeto con .message directamente,
+   * NO con .error.message (esa es la estructura del HttpErrorResponse crudo).
+   *
+   * La implementación original solo miraba error.error.message, perdiendo el
+   * mensaje ya normalizado que viene en error.message del ApiError.
+   *
+   * Ahora se busca en ambos lugares con el orden correcto:
+   *   1. error.message       → ApiError normalizado por el interceptor (caso más común)
+   *   2. error.error.message → HttpErrorResponse crudo (fallback por si el interceptor no actuó)
+   *   3. error.error         → body como string plano
+   */
   private extractBackendMessage(error: unknown): string {
     if (!error || typeof error !== 'object') {
       return '';
     }
-
-    const httpError = error as { error?: unknown; message?: unknown };
-    const body = httpError.error;
-
+ 
+    const err = error as Record<string, any>;
+ 
+    // Prioridad 1: mensaje ya normalizado por el interceptor (ApiError.message)
+    if (typeof err['message'] === 'string' && err['message'] && err['message'] !== 'Unknown Error') {
+      return err['message'];
+    }
+ 
+    // Prioridad 2: body del HttpErrorResponse crudo (error.error.message)
+    const body = err['error'];
     if (body && typeof body === 'object') {
-      const responseMessage = (body as { message?: unknown; error?: unknown }).message
-        ?? (body as { error?: unknown }).error;
+      const responseMessage = (body as Record<string, unknown>)['message'] ?? (body as Record<string, unknown>)['error'];
       return typeof responseMessage === 'string' ? responseMessage : '';
     }
-
+ 
+    // Prioridad 3: body como string plano
     if (typeof body === 'string') {
       return body;
     }
-
-    return typeof httpError.message === 'string' ? httpError.message : '';
+ 
+    return '';
   }
 }
