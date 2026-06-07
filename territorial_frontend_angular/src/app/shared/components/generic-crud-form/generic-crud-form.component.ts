@@ -1,4 +1,3 @@
-
 import { CommonModule } from '@angular/common';
 import {
   ChangeDetectionStrategy,
@@ -113,8 +112,12 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
     try {
       const formValue = this.form.value;
  
-      // Validación de duplicado solo en creación
-      if (!this.item && this.config.searchEndpoint) {
+      // Validación de duplicado solo en creación y solo si el config no la omite.
+      // CU-02 FIX 1: Cuando skipDuplicateCheck=true (ej: Officials, donde la
+      // unicidad es por email y no por name), se salta esta comprobación previa.
+      // El backend siempre valida y, si falla, el catch de abajo muestra el
+      // mensaje en duplicateError gracias al interceptor (FIX 2 del form).
+      if (!this.item && this.config.searchEndpoint && !this.config.skipDuplicateCheck) {
         const nameField = this.config.fields.find((f) => f.key === 'name');
         if (nameField) {
           const isDuplicate = await this.checkDuplicate(formValue.name, this.config.searchEndpoint);

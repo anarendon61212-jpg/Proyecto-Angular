@@ -38,6 +38,13 @@ export interface EntityConfig {
   searchEndpoint?: string;
   dependencyCheck?: DependencyCheck;
   dependencyChecks?: DependencyCheck[];
+  /**
+   * CU-02 FIX 1: Cuando la unicidad del recurso NO es por "name" sino por otro campo
+   * (ej: Officials se valida por "email"), se puede omitir la comprobación previa de
+   * duplicado por nombre. El backend siempre es la fuente definitiva de verdad —
+   * si hay duplicado, devuelve HTTP 400 y generic-crud-form lo muestra en el banner.
+   */
+  skipDuplicateCheck?: boolean;
   unsupportedFieldFallback?: {
     fields: string[];
     warningMessage: string;
@@ -169,6 +176,14 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
     idField: 'id_official',
     hasFile: false,
     searchEndpoint: 'officials/search',
+    // CU-02 FIX 1: No hacer checkDuplicate por nombre. La unicidad en Officials
+    // es por "email", no por "name". Si el email ya existe el backend responde
+    // HTTP 400 y generic-crud-form.ts ya muestra el mensaje en el banner (FIX 2 del form).
+    skipDuplicateCheck: true,
+    // NOTA CU-02 E3 (eliminar): El modelo Annotation del backend NO tiene campo id_official,
+    // por lo que no es posible verificar dependencias vía search antes de eliminar.
+    // El propio backend bloquea el DELETE con HTTP 400 si hay una FK violation en BD
+    // y el interceptor muestra ese mensaje en el toast. No se define dependencyChecks aquí.
     columns: [
       { key: 'name', header: 'Nombre' },
       { key: 'email', header: 'Correo' },
@@ -191,17 +206,21 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
         type: 'email',
         required: true,
         placeholder: 'juan.perez@manizales.gov.co'
+        // CU-02 FIX 1: La validación de email único la maneja el backend (HTTP 400).
+        // El generic-crud-form.ts ya captura el mensaje del interceptor y lo muestra
+        // en el banner del formulario (duplicateError). No se necesita checkDuplicate
+        // por nombre aquí — el email se valida al hacer POST/PUT.
       },
       {
         key: 'phone',
-        label: 'Teléfono',
+        label: 'Celular',
         type: 'tel',
         required: false,
-        placeholder: '+57 6 xxxx xxxx'
+        placeholder: '+57 3xx xxx xxxx'
       },
       {
         key: 'role',
-        label: 'Rol',
+        label: 'Cargo / Rol',
         type: 'text',
         required: true,
         placeholder: 'Ej: Inspector, Gestor territorial',
@@ -212,16 +231,20 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
         label: 'Entidad',
         type: 'select',
         required: true,
-        options: [] // Será llenado dinámicamente
+        options: [], // Llenado dinámicamente en OfficialsListGenericComponent
+        hint: 'Selecciona la entidad a la que pertenece el funcionario'
       },
       {
         key: 'status',
         label: 'Estado',
         type: 'select',
         required: true,
+        // CU-02 FIX 2: El backend exige "active" / "inactive" (minúscula inglés).
+        // La ref. de respuestas confirma: gps_active tracking requiere status "active" o "activo".
+        // Los valores anteriores "Activo"/"Inactivo" eran rechazados por el tracking del backend.
         options: [
-          { label: 'Activo', value: 'Activo' },
-          { label: 'Inactivo', value: 'Inactivo' }
+          { label: 'Activo', value: 'active' },
+          { label: 'Inactivo', value: 'inactive' }
         ]
       }
     ]
