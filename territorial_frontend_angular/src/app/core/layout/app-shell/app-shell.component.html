@@ -69,14 +69,6 @@
       </div>
     </header>
 
-    @if (lastError(); as error) {
-      <section class="error-banner" role="alert">
-        <span>⚠</span>
-        <strong>{{ error.message }}</strong>
-        <button type="button" (click)="clearError()">Cerrar</button>
-      </section>
-    }
-
     <main class="content">
       <router-outlet />
     </main>

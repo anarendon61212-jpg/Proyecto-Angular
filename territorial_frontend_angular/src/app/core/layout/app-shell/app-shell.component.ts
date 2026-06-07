@@ -4,7 +4,6 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../../auth/auth.service';
 import { MAIN_NAVIGATION, NavigationItem } from '../../config/navigation.config';
 import { TERRITORIAL_APP_CONFIG } from '../../config/territorial-app-config';
-import { ErrorStateService } from '../../services/error-state.service';
 import { LoadingService } from '../../services/loading.service';
 import { ToastContainerComponent } from '@shared/components/toast-container/toast-container.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
@@ -25,14 +24,12 @@ interface NavigationSection {
 export class AppShellComponent {
   private readonly authService = inject(AuthService);
   private readonly loadingService = inject(LoadingService);
-  private readonly errorState = inject(ErrorStateService);
   private readonly config = inject(TERRITORIAL_APP_CONFIG);
 
   readonly appName = this.config.appName;
   readonly currentUser = this.authService.currentUser;
   readonly currentRole = this.authService.currentRole;
   readonly isLoading = this.loadingService.isLoading;
-  readonly lastError = this.errorState.lastError;
   readonly notificationCount = 3;
 
   readonly navigationSections = computed<NavigationSection[]>(() => {
@@ -58,10 +55,6 @@ export class AppShellComponent {
       ];
     }, []);
   });
-
-  clearError(): void {
-    this.errorState.clear();
-  }
 
   logout(): void {
     this.authService.logout();
