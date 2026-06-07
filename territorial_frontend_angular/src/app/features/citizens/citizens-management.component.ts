@@ -447,16 +447,9 @@ export class CitizensManagementComponent implements AfterViewInit, OnDestroy {
   }
 
   private saveErrorMessage(error: unknown): string {
-    if (error && typeof error === 'object' && 'error' in error) {
-      const body = (error as { error?: { message?: string; error?: string } | string }).error;
-      if (typeof body === 'string') {
-        return body;
-      }
-      if (body?.message || body?.error) {
-        return body.message || body.error || 'No se pudo guardar el ciudadano.';
-      }
-    }
-
-    return 'No se pudo guardar el ciudadano.';
+    const isUpdate = Boolean(this.editingCitizen);
+    return isUpdate
+      ? 'No se pudo actualizar el ciudadano. Verifica los datos e inténtalo de nuevo.'
+      : 'No se pudo crear el ciudadano. Verifica los datos e inténtalo de nuevo.';
   }
 }
