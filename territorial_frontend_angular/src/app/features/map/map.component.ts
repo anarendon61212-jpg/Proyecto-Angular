@@ -3,7 +3,7 @@ import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, inject, 
 import * as L from 'leaflet';
 import { combineLatest, Subject, takeUntil } from 'rxjs';
 
-import { Neighborhood, Point } from '../../core/models/territorial.models';
+import { Neighborhood, Point, PointPayload } from '../../core/models/territorial.models';
 import { NeighborhoodCrudService, PointCrudService } from '../../core/api/territorial-crud.services';
 
 interface NeighborhoodShape {
@@ -81,6 +81,15 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
         </div>
 
         <div class="panel-section">
+          <h3>Demarcación de barrio</h3>
+          <p *ngIf="!isEditingPolygon">Seleccione un barrio y haga clic para demarcar sus límites.</p>
+          <p *ngIf="isEditingPolygon" style="color: var(--color-danger);">Haga clic en el mapa para agregar puntos. Mínimo 3 puntos.</p>
+          <button type="button" class="app-button app-button--primary" *ngIf="!isEditingPolygon" (click)="startPolygonEditing()">Demarcar barrio</button>
+          <button type="button" class="app-button app-button--secondary" *ngIf="isEditingPolygon" (click)="savePolygon()">Guardar polígono</button>
+          <button type="button" class="app-button app-button--danger" *ngIf="isEditingPolygon" (click)="cancelPolygonEditing()">Cancelar</button>
+        </div>
+
+        <div class="panel-section">
           <h3>Mapa</h3>
           <button type="button" class="app-button app-button--secondary" (click)="setBaseLayer('streets')">Calles</button>
           <button type="button" class="app-button app-button--secondary" (click)="setBaseLayer('topographic')">Topográfico</button>
@@ -120,7 +129,6 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     `.map-point-marker { width: 16px; height: 16px; border: 2px solid #ffffff; border-radius: 50%; background: var(--color-danger); box-shadow: 0 0 0 5px rgba(239, 35, 60, 0.16); }`,
     `@media (max-width: 980px) { .map-page { grid-template-columns: 1fr; } }`
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class MapComponent implements AfterViewInit, OnDestroy {
   @ViewChild('mapContainer', { static: true }) private readonly mapContainer!: ElementRef<HTMLDivElement>;
@@ -138,15 +146,22 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     polygon: true,
     boundary: true
   };
+  isEditingPolygon = false;
   private map!: L.Map;
   private baseLayers!: Record<string, L.TileLayer>;
   private neighborhoodLayer = L.layerGroup();
   private pointLayer = L.layerGroup();
   private selectedNeighborhoodLayer = L.layerGroup();
+  private editingLayer = L.layerGroup();
+  private polygonPoints: L.LatLng[] = [];
+  private polygonMarkers: L.Marker[] = [];
+  private polygonLine: L.Polyline | null = null;
+  private selectedNeighborhoodId: number | null = null;
 
   ngAfterViewInit(): void {
     this.initializeMap();
     this.loadTerritorialData();
+    this.editingLayer.addTo(this.map);
   }
 
   ngOnDestroy(): void {
@@ -182,8 +197,110 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     const target = event.target as HTMLSelectElement | null;
     const value = target?.value ?? '';
     const selectedId = value ? Number(value) : null;
+    this.selectedNeighborhoodId = selectedId;
     this.focusOnNeighborhood(selectedId);
     this.refreshMapLayers();
+  }
+
+  startPolygonEditing(): void {
+    if (this.selectedNeighborhoodId == null) {
+      alert('Por favor seleccione un barrio primero');
+      return;
+    }
+    this.isEditingPolygon = true;
+    this.polygonPoints = [];
+    this.polygonMarkers = [];
+    this.editingLayer.clearLayers();
+    if (this.polygonLine) {
+      this.map.removeLayer(this.polygonLine);
+      this.polygonLine = null;
+    }
+    this.map.on('click', this.onMapClick);
+  }
+
+  cancelPolygonEditing(): void {
+    this.isEditingPolygon = false;
+    this.polygonPoints = [];
+    this.polygonMarkers.forEach(marker => this.editingLayer.removeLayer(marker));
+    this.polygonMarkers = [];
+    if (this.polygonLine) {
+      this.map.removeLayer(this.polygonLine);
+      this.polygonLine = null;
+    }
+    this.map.off('click', this.onMapClick);
+  }
+
+  savePolygon(): void {
+    if (this.polygonPoints.length < 3) {
+      alert('Se necesitan al menos 3 puntos para formar un polígono');
+      return;
+    }
+
+    const pointsToSave: PointPayload[] = this.polygonPoints.map((latLng, index) => ({
+      id_neighborhood: this.selectedNeighborhoodId,
+      latitude: latLng.lat,
+      longitude: latLng.lng,
+      order: index,
+      point_type: 'polygon'
+    }));
+
+    pointsToSave.forEach(pointPayload => {
+      this.pointService.create(pointPayload).subscribe();
+    });
+
+    alert('Polígono guardado exitosamente');
+    this.cancelPolygonEditing();
+    this.loadTerritorialData();
+  }
+
+  private onMapClick = (e: L.LeafletMouseEvent): void => {
+    if (!this.isEditingPolygon) return;
+
+    const latLng = e.latlng;
+    this.polygonPoints.push(latLng);
+
+    const marker = L.marker(latLng, {
+      draggable: true,
+      icon: L.divIcon({
+        className: 'polygon-edit-marker',
+        html: '<div style="width: 12px; height: 12px; background: #ef233c; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 3px rgba(239, 35, 60, 0.3);"></div>',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
+      })
+    });
+
+    marker.on('dragend', (event) => {
+      const draggedMarker = event.target as L.Marker;
+      const newIndex = this.polygonMarkers.indexOf(draggedMarker);
+      if (newIndex !== -1) {
+        this.polygonPoints[newIndex] = draggedMarker.getLatLng();
+        this.updatePolygonLine();
+      }
+    });
+
+    this.polygonMarkers.push(marker);
+    this.editingLayer.addLayer(marker);
+    this.updatePolygonLine();
+  };
+
+  private updatePolygonLine(): void {
+    if (this.polygonLine) {
+      this.map.removeLayer(this.polygonLine);
+    }
+
+    if (this.polygonPoints.length < 2) return;
+
+    const points = [...this.polygonPoints];
+    if (points.length >= 3) {
+      points.push(points[0]);
+    }
+
+    this.polygonLine = L.polyline(points, {
+      color: '#ef233c',
+      weight: 3,
+      opacity: 0.8,
+      dashArray: '10, 5'
+    }).addTo(this.map);
   }
 
   private initializeMap(): void {
@@ -255,6 +372,45 @@ export class MapComponent implements AfterViewInit, OnDestroy {
 
       this.neighborhoodLayer.addLayer(polygon);
     }
+
+    this.renderSavedPolygons();
+  }
+
+  private renderSavedPolygons(): void {
+    const polygonPoints = this.points.filter(p => p.point_type === 'polygon' && p.id_neighborhood != null);
+
+    const neighborhoodPointsMap = new Map<number, Point[]>();
+    polygonPoints.forEach(point => {
+      const neighborhoodId = point.id_neighborhood!;
+      if (!neighborhoodPointsMap.has(neighborhoodId)) {
+        neighborhoodPointsMap.set(neighborhoodId, []);
+      }
+      neighborhoodPointsMap.get(neighborhoodId)!.push(point);
+    });
+
+    neighborhoodPointsMap.forEach((points, neighborhoodId) => {
+      const sortedPoints = points.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      const coordinates = sortedPoints.map(p => [p.latitude, p.longitude] as L.LatLngTuple);
+
+      if (coordinates.length >= 3) {
+        const neighborhood = this.neighborhoods.find(n => n.id_neighborhood === neighborhoodId);
+        const polygon = L.polygon(coordinates, {
+          color: '#1459f5',
+          weight: 2,
+          fillOpacity: 0.12
+        });
+
+        if (neighborhood) {
+          polygon.bindTooltip(neighborhood.name, { direction: 'top' });
+        }
+
+        polygon.on('click', () => {
+          this.focusOnNeighborhood(neighborhoodId);
+        });
+
+        this.neighborhoodLayer.addLayer(polygon);
+      }
+    });
   }
 
   private renderPointMarkers(): void {
@@ -279,6 +435,25 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private focusOnNeighborhood(neighborhoodId: number | null): void {
     if (neighborhoodId == null) {
       this.map.setView([5.074, -75.515], 14);
+      return;
+    }
+
+    const polygonPoints = this.points
+      .filter(p => p.point_type === 'polygon' && p.id_neighborhood === neighborhoodId)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+    if (polygonPoints.length >= 3) {
+      const coordinates = polygonPoints.map(p => [p.latitude, p.longitude] as L.LatLngTuple);
+      this.map.fitBounds(coordinates as L.LatLngBoundsExpression);
+      this.selectedNeighborhoodLayer.clearLayers();
+
+      const highlight = L.polygon(coordinates, {
+        color: '#ef233c',
+        weight: 3,
+        fillOpacity: 0.04
+      });
+
+      this.selectedNeighborhoodLayer.addLayer(highlight);
       return;
     }
 
