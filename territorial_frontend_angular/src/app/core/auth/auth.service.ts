@@ -261,6 +261,11 @@ export class AuthService {
     this.storage?.removeItem('Rol');
     this.storage?.removeItem('Token');
     this.storage?.removeItem('Correo');
+    this.storage?.removeItem(this.config.oauthStateStorageKey);
+    this.storage?.removeItem(this.config.oauthRedirectStorageKey);
+    this.clearPendingOAuthProfile();
+    sessionStorage.removeItem('pendingRole');
+    this.errorState.clear();
     this.accessToken.set(null);
     this.currentUser.set(null);
     void this.router.navigateByUrl('/auth/login');

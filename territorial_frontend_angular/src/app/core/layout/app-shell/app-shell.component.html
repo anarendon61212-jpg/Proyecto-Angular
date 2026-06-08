@@ -58,13 +58,16 @@
           }
         </button>
 
-        <button class="user-menu" type="button" title="Cerrar sesión" (click)="logout()">
+        <div class="user-menu" aria-label="Usuario autenticado">
           <span class="user-menu__avatar">{{ currentUser()?.initials }}</span>
           <span>
             <strong>{{ currentUser()?.name }}</strong>
             <small>{{ currentUser()?.entityName || currentUser()?.role }}</small>
           </span>
-          <span aria-hidden="true">⌄</span>
+        </div>
+
+        <button class="logout-button" type="button" title="Cerrar sesión" aria-label="Cerrar sesión" (click)="logout()">
+          <span aria-hidden="true">Salir</span>
         </button>
       </div>
     </header>
