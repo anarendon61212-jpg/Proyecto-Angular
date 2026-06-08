@@ -83,8 +83,9 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
         <div class="panel-section">
           <h3>Demarcación de barrio</h3>
           <p *ngIf="!isEditingPolygon">Seleccione un barrio y haga clic para demarcar sus límites.</p>
-          <p *ngIf="isEditingPolygon" style="color: var(--color-danger);">Haga clic en el mapa para agregar puntos. Mínimo 3 puntos.</p>
+          <p *ngIf="isEditingPolygon" style="color: var(--color-danger);">Haga clic en el mapa para agregar puntos. Clic derecho en un punto para eliminarlo. Mínimo 3 puntos.</p>
           <button type="button" class="app-button app-button--primary" *ngIf="!isEditingPolygon" (click)="startPolygonEditing()">Demarcar barrio</button>
+          <button type="button" class="app-button app-button--secondary" *ngIf="!isEditingPolygon" (click)="startExistingPolygonEditing()">Editar polígono</button>
           <button type="button" class="app-button app-button--secondary" *ngIf="isEditingPolygon" (click)="savePolygon()">Guardar polígono</button>
           <button type="button" class="app-button app-button--danger" *ngIf="isEditingPolygon" (click)="cancelPolygonEditing()">Cancelar</button>
         </div>
@@ -147,6 +148,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     boundary: true
   };
   isEditingPolygon = false;
+  isEditingExistingPolygon = false;
   private map!: L.Map;
   private baseLayers!: Record<string, L.TileLayer>;
   private neighborhoodLayer = L.layerGroup();
@@ -157,6 +159,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private polygonMarkers: L.Marker[] = [];
   private polygonLine: L.Polyline | null = null;
   private selectedNeighborhoodId: number | null = null;
+  private existingPolygonPoints: Point[] = [];
 
   ngAfterViewInit(): void {
     this.initializeMap();
@@ -208,8 +211,10 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       return;
     }
     this.isEditingPolygon = true;
+    this.isEditingExistingPolygon = false;
     this.polygonPoints = [];
     this.polygonMarkers = [];
+    this.existingPolygonPoints = [];
     this.editingLayer.clearLayers();
     if (this.polygonLine) {
       this.map.removeLayer(this.polygonLine);
@@ -218,11 +223,44 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     this.map.on('click', this.onMapClick);
   }
 
+  startExistingPolygonEditing(): void {
+    if (this.selectedNeighborhoodId == null) {
+      alert('Por favor seleccione un barrio primero');
+      return;
+    }
+
+    const polygonPoints = this.points
+      .filter(p => p.point_type === 'polygon' && p.id_neighborhood === this.selectedNeighborhoodId)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+    if (polygonPoints.length < 3) {
+      alert('Este barrio no tiene un polígono guardado. Use "Demarcar barrio" para crear uno nuevo.');
+      return;
+    }
+
+    this.isEditingPolygon = true;
+    this.isEditingExistingPolygon = true;
+    this.existingPolygonPoints = [...polygonPoints];
+    this.polygonPoints = polygonPoints.map(p => L.latLng(p.latitude, p.longitude));
+    this.polygonMarkers = [];
+    this.editingLayer.clearLayers();
+    if (this.polygonLine) {
+      this.map.removeLayer(this.polygonLine);
+      this.polygonLine = null;
+    }
+
+    this.renderExistingPolygonMarkers();
+    this.updatePolygonLine();
+    this.map.on('click', this.onMapClick);
+  }
+
   cancelPolygonEditing(): void {
     this.isEditingPolygon = false;
+    this.isEditingExistingPolygon = false;
     this.polygonPoints = [];
     this.polygonMarkers.forEach(marker => this.editingLayer.removeLayer(marker));
     this.polygonMarkers = [];
+    this.existingPolygonPoints = [];
     if (this.polygonLine) {
       this.map.removeLayer(this.polygonLine);
       this.polygonLine = null;
@@ -236,6 +274,14 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       return;
     }
 
+    if (this.isEditingExistingPolygon) {
+      this.updateExistingPolygon();
+    } else {
+      this.createNewPolygon();
+    }
+  }
+
+  private createNewPolygon(): void {
     const pointsToSave: PointPayload[] = this.polygonPoints.map((latLng, index) => ({
       id_neighborhood: this.selectedNeighborhoodId,
       latitude: latLng.lat,
@@ -251,6 +297,102 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     alert('Polígono guardado exitosamente');
     this.cancelPolygonEditing();
     this.loadTerritorialData();
+  }
+
+  private updateExistingPolygon(): void {
+    const pointsToDelete = this.existingPolygonPoints.filter(
+      existing => !this.polygonPoints.some(p => p.lat === existing.latitude && p.lng === existing.longitude)
+    );
+
+    const pointsToUpdate: { point: Point; latLng: L.LatLng }[] = [];
+    const pointsToCreate: PointPayload[] = [];
+
+    this.polygonPoints.forEach((latLng, index) => {
+      const existingPoint = this.existingPolygonPoints.find(
+        p => p.latitude === latLng.lat && p.longitude === latLng.lng
+      );
+
+      if (existingPoint) {
+        pointsToUpdate.push({ point: existingPoint, latLng });
+      } else {
+        pointsToCreate.push({
+          id_neighborhood: this.selectedNeighborhoodId,
+          latitude: latLng.lat,
+          longitude: latLng.lng,
+          order: index,
+          point_type: 'polygon'
+        });
+      }
+    });
+
+    pointsToDelete.forEach(point => {
+      this.pointService.delete(point.id_point).subscribe();
+    });
+
+    pointsToUpdate.forEach(({ point, latLng }) => {
+      this.pointService.update(point.id_point, {
+        latitude: latLng.lat,
+        longitude: latLng.lng,
+        order: this.polygonPoints.indexOf(latLng)
+      }).subscribe();
+    });
+
+    pointsToCreate.forEach(pointPayload => {
+      this.pointService.create(pointPayload).subscribe();
+    });
+
+    alert('Polígono actualizado exitosamente');
+    this.cancelPolygonEditing();
+    this.loadTerritorialData();
+  }
+
+  private renderExistingPolygonMarkers(): void {
+    this.polygonPoints.forEach((latLng, index) => {
+      const marker = L.marker(latLng, {
+        draggable: true,
+        icon: L.divIcon({
+          className: 'polygon-edit-marker',
+          html: '<div style="width: 12px; height: 12px; background: #ef233c; border: 2px solid white; border-radius: 50%; box-shadow: 0 0 0 3px rgba(239, 35, 60, 0.3);"></div>',
+          iconSize: [12, 12],
+          iconAnchor: [6, 6]
+        })
+      });
+
+      marker.on('dragend', (event) => {
+        const draggedMarker = event.target as L.Marker;
+        const newIndex = this.polygonMarkers.indexOf(draggedMarker);
+        if (newIndex !== -1) {
+          this.polygonPoints[newIndex] = draggedMarker.getLatLng();
+          this.updatePolygonLine();
+        }
+      });
+
+      marker.on('contextmenu', (event) => {
+        event.originalEvent.preventDefault();
+        event.originalEvent.stopPropagation();
+        const currentIndex = this.polygonMarkers.indexOf(marker);
+        if (currentIndex !== -1) {
+          this.removePolygonPoint(currentIndex);
+        }
+      });
+
+      this.polygonMarkers.push(marker);
+      this.editingLayer.addLayer(marker);
+    });
+  }
+
+  private removePolygonPoint(index: number): void {
+    if (this.polygonPoints.length <= 3) {
+      alert('No se pueden eliminar más puntos. Mínimo 3 puntos requeridos.');
+      return;
+    }
+
+    this.polygonPoints.splice(index, 1);
+    const marker = this.polygonMarkers[index];
+    this.editingLayer.removeLayer(marker);
+    this.polygonMarkers.splice(index, 1);
+
+    this.updatePolygonLine();
   }
 
   private onMapClick = (e: L.LeafletMouseEvent): void => {
@@ -275,6 +417,15 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       if (newIndex !== -1) {
         this.polygonPoints[newIndex] = draggedMarker.getLatLng();
         this.updatePolygonLine();
+      }
+    });
+
+    marker.on('contextmenu', (event) => {
+      event.originalEvent.preventDefault();
+      event.originalEvent.stopPropagation();
+      const index = this.polygonMarkers.indexOf(marker);
+      if (index !== -1) {
+        this.removePolygonPoint(index);
       }
     });
 
