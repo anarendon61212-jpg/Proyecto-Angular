@@ -263,6 +263,8 @@ export class AuthService {
     this.storage?.removeItem('Correo');
     this.storage?.removeItem(this.config.oauthStateStorageKey);
     this.storage?.removeItem(this.config.oauthRedirectStorageKey);
+    this.rememberStoredOAuthRoles();
+    this.storage?.removeItem(this.config.oauthProfileStorageKey);
     this.clearPendingOAuthProfile();
     sessionStorage.removeItem('pendingRole');
     this.errorState.clear();
@@ -310,6 +312,24 @@ export class AuthService {
           name: response.profile.name || storedProfile.name,
           email: response.profile.email || storedProfile.email,
           accessToken: response.profile.accessToken
+        };
+        this.storeOAuthProfile(profile);
+
+        return {
+          session: this.createSessionFromStoredOAuthProfile(profile)
+        };
+      }
+
+      const storedRole = this.readStoredOAuthRole(response.profile.providerUserId);
+
+      if (storedRole) {
+        const profile: StoredOAuthProfile = {
+          provider: response.profile.provider,
+          providerUserId: response.profile.providerUserId,
+          name: response.profile.name,
+          email: response.profile.email,
+          accessToken: response.profile.accessToken,
+          role: storedRole
         };
         this.storeOAuthProfile(profile);
 
@@ -427,7 +447,7 @@ export class AuthService {
     }
 
     try {
-      const profiles = JSON.parse(rawProfile) as Record<string, StoredOAuthProfile>;
+      const profiles = this.normalizeStoredOAuthProfiles(JSON.parse(rawProfile));
       const profile = providerUserId
         ? profiles[providerUserId]
         : Object.values(profiles)[0];
@@ -445,7 +465,7 @@ export class AuthService {
 
     if (rawProfile) {
       try {
-        profiles = JSON.parse(rawProfile) as Record<string, StoredOAuthProfile>;
+        profiles = this.normalizeStoredOAuthProfiles(JSON.parse(rawProfile));
       } catch {
         profiles = {};
       }
@@ -453,6 +473,94 @@ export class AuthService {
 
     profiles[profile.providerUserId] = profile;
     this.storage?.setItem(this.config.oauthProfileStorageKey, JSON.stringify(profiles));
+    this.storeOAuthRole(profile.providerUserId, profile.role);
+  }
+
+  private rememberStoredOAuthRoles(): void {
+    const rawProfile = this.storage?.getItem(this.config.oauthProfileStorageKey);
+
+    if (!rawProfile) {
+      return;
+    }
+
+    try {
+      const profiles = this.normalizeStoredOAuthProfiles(JSON.parse(rawProfile));
+      Object.values(profiles).forEach((profile) => {
+        this.storeOAuthRole(profile.providerUserId, profile.role);
+      });
+    } catch {
+      this.storage?.removeItem(this.config.oauthProfileStorageKey);
+    }
+  }
+
+  private readStoredOAuthRole(providerUserId: string): RegistrableUserRole | null {
+    const rawRoles = this.storage?.getItem(this.oauthRoleStorageKey);
+
+    if (!rawRoles) {
+      return null;
+    }
+
+    try {
+      const roles = JSON.parse(rawRoles) as Record<string, RegistrableUserRole>;
+      const role = roles[providerUserId];
+      return role === 'Ciudadano' || role === 'Funcionario' ? role : null;
+    } catch {
+      this.storage?.removeItem(this.oauthRoleStorageKey);
+      return null;
+    }
+  }
+
+  private storeOAuthRole(providerUserId: string, role: RegistrableUserRole): void {
+    let roles: Record<string, RegistrableUserRole> = {};
+    const rawRoles = this.storage?.getItem(this.oauthRoleStorageKey);
+
+    if (rawRoles) {
+      try {
+        roles = JSON.parse(rawRoles) as Record<string, RegistrableUserRole>;
+      } catch {
+        roles = {};
+      }
+    }
+
+    roles[providerUserId] = role;
+    this.storage?.setItem(this.oauthRoleStorageKey, JSON.stringify(roles));
+  }
+
+  private normalizeStoredOAuthProfiles(value: unknown): Record<string, StoredOAuthProfile> {
+    if (!value || typeof value !== 'object') {
+      return {};
+    }
+
+    return Object.entries(value as Record<string, unknown>).reduce<Record<string, StoredOAuthProfile>>(
+      (profiles, [key, profileValue]) => {
+        if (!profileValue || typeof profileValue !== 'object') {
+          return profiles;
+        }
+
+        const profile = profileValue as Partial<StoredOAuthProfile>;
+        const providerUserId = profile.providerUserId || key;
+
+        if (
+          profile.provider !== 'github' ||
+          !providerUserId ||
+          (profile.role !== 'Ciudadano' && profile.role !== 'Funcionario')
+        ) {
+          return profiles;
+        }
+
+        profiles[providerUserId] = {
+          provider: 'github',
+          providerUserId,
+          name: profile.name,
+          email: profile.email,
+          accessToken: profile.accessToken,
+          role: profile.role
+        };
+
+        return profiles;
+      },
+      {}
+    );
   }
 
   private storePendingOAuthProfile(profile: OAuthProfile): void {
@@ -522,6 +630,10 @@ export class AuthService {
     }
 
     return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  private get oauthRoleStorageKey(): string {
+    return `${this.config.oauthProfileStorageKey}.roles`;
   }
 
   private get storage(): Storage | null {
