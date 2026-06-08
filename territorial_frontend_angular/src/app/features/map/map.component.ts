@@ -12,8 +12,11 @@ import {
   Citizen,
   Entity,
   Neighborhood,
+  Official,
+  OfficialTracking,
   Point,
-  PointPayload
+  PointPayload,
+  TrackingPayload
 } from '../../core/models/territorial.models';
 import {
   AnnotationCategoryCrudService,
@@ -24,10 +27,12 @@ import {
   EvidenceCrudService,
   InterestedPartyCrudService,
   NeighborhoodCrudService,
+  OfficialCrudService,
   PointCrudService
 } from '../../core/api/territorial-crud.services';
 import { FileUploadComponent } from '../../shared/components/file-upload/file-upload.component';
 import { ToastService } from '../../shared/services/toast.service';
+import { TrackingService } from '../../core/services/tracking.service';
 
 interface NeighborhoodShape {
   id: number;
@@ -101,6 +106,25 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
           <label><input type="checkbox" [checked]="pointFilters.annotation" (change)="togglePointType('annotation', $event.target.checked)" /> Anotaciones</label>
           <label><input type="checkbox" [checked]="pointFilters.polygon" (change)="togglePointType('polygon', $event.target.checked)" /> Polígonos</label>
           <label><input type="checkbox" [checked]="pointFilters.boundary" (change)="togglePointType('boundary', $event.target.checked)" /> Linderos</label>
+        </div>
+
+        <div class="panel-section">
+          <h3>Funcionarios en tiempo real</h3>
+          <label>
+            <input
+              type="checkbox"
+              [checked]="showRealtimeOfficials"
+              (change)="toggleRealtimeOfficials($event.target.checked)"
+            />
+            Mostrar funcionarios en tiempo real
+          </label>
+          <label for="entity-filter-select">Entidad</label>
+          <select id="entity-filter-select" [value]="selectedEntityFilter ?? ''" (change)="onEntityFilterSelected($event)">
+            <option value="">Todas las entidades</option>
+            <option *ngFor="let entity of trackingEntities" [value]="entity.id_entity">
+              {{ entity.name }}
+            </option>
+          </select>
         </div>
 
         <div class="panel-section">
@@ -269,6 +293,8 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     `.leaflet-container { min-height: 640px; width: 100%; border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }`,
     `.map-point-marker { width: 16px; height: 16px; border: 2px solid #ffffff; border-radius: 50%; background: var(--color-danger); box-shadow: 0 0 0 5px rgba(239, 35, 60, 0.16); }`,
     `.map-annotation-marker { width: 20px; height: 20px; border: 2px solid #fff; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 5px rgba(245, 158, 11, 0.25); }`,
+    `.official-marker { width: 16px; height: 16px; border: 2px solid #fff; border-radius: 50%; background: #10b981; box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.25); transition: opacity 0.2s ease, filter 0.2s ease; }`,
+    `.official-marker--offline { opacity: 0.45; filter: grayscale(1); }`,
     `.annotation-cursor, .annotation-cursor .leaflet-interactive { cursor: crosshair !important; }`,
     `.annotation-mode-hint { color: var(--color-primary); font-weight: 500; }`,
     `@media (max-width: 980px) { .map-page { grid-template-columns: 1fr; } }`,
@@ -315,6 +341,8 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private readonly evidenceService = inject(EvidenceCrudService);
   private readonly interestedPartyService = inject(InterestedPartyCrudService);
   private readonly annotationCategoryService = inject(AnnotationCategoryCrudService);
+  private readonly officialService = inject(OfficialCrudService);
+  private readonly trackingService = inject(TrackingService);
   private readonly toastService = inject(ToastService);
 
   private readonly destroy$ = new Subject<void>();
@@ -338,6 +366,9 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private annotationLayer = L.layerGroup();
   private selectedNeighborhoodLayer = L.layerGroup();
   private editingLayer = L.layerGroup();
+  private trackingLayer = L.layerGroup();
+  private officialsById = new Map<number, Official>();
+  private officialMarkers = new Map<number, L.Marker>();
   private polygonPoints: L.LatLng[] = [];
   private polygonMarkers: L.Marker[] = [];
   private polygonLine: L.Polyline | null = null;
@@ -355,6 +386,9 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   annotationEntities: Entity[] = [];
   annotationCitizens: Citizen[] = [];
   annotationPhotoFiles: File[] = [];
+  trackingEntities: Entity[] = [];
+  selectedEntityFilter: number | null = null;
+  showRealtimeOfficials = true;
 
   annotationForm = new FormGroup({
     id_citizen: new FormControl<number | null>(null),
@@ -369,6 +403,8 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     this.initializeMap();
     this.loadTerritorialData();
     this.loadAnnotationFormData();
+    this.loadOfficialsBaseData();
+    this.initializeTracking();
     this.editingLayer.addTo(this.map);
   }
 
@@ -398,6 +434,23 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   togglePointType(type: keyof typeof this.pointFilters, checked: boolean): void {
     this.pointFilters[type] = checked;
     this.refreshMapLayers();
+  }
+
+  toggleRealtimeOfficials(enabled: boolean): void {
+    this.showRealtimeOfficials = enabled;
+    if (!enabled) {
+      this.trackingLayer.clearLayers();
+      this.officialMarkers.clear();
+      return;
+    }
+    this.rebuildVisibleTrackingMarkers();
+  }
+
+  onEntityFilterSelected(event: Event): void {
+    const target = event.target as HTMLSelectElement | null;
+    const value = target?.value ?? '';
+    this.selectedEntityFilter = value ? Number(value) : null;
+    this.rebuildVisibleTrackingMarkers();
   }
 
   onNeighborhoodSelected(event: Event): void {
@@ -969,6 +1022,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     this.annotationLayer.addTo(this.map);
     this.pointLayer.addTo(this.map);
     this.selectedNeighborhoodLayer.addTo(this.map);
+    this.trackingLayer.addTo(this.map);
   }
 
   private loadTerritorialData(): void {
@@ -1135,5 +1189,126 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     point.latitude = latLng.lat;
     point.longitude = latLng.lng;
     this.pointService.update(point.id_point, { latitude: latLng.lat, longitude: latLng.lng }).subscribe();
+  }
+
+  private loadOfficialsBaseData(): void {
+    combineLatest([
+      this.officialService.listCollection(),
+      this.entityService.listCollection()
+    ])
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(([officialCollection, entityCollection]) => {
+        this.trackingEntities = entityCollection.items;
+        this.officialsById.clear();
+        for (const official of officialCollection.items) {
+          this.officialsById.set(official.id_official, official);
+        }
+      });
+  }
+
+  private initializeTracking(): void {
+    this.trackingService
+      .listenTracking()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((payload) => {
+        this.applyTrackingPayload(payload);
+      });
+
+    this.trackingService
+      .connectionStatus$()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((status) => {
+        if (status === 'error' || status === 'disconnected') {
+          this.toastService.warning(
+            'Seguimiento en tiempo real temporalmente no disponible',
+            'Reintentando reconexión automática.'
+          );
+        }
+      });
+  }
+
+  private applyTrackingPayload(payload: TrackingPayload): void {
+    if (!payload || !Array.isArray(payload.officials) || payload.officials.length === 0) {
+      return;
+    }
+
+    for (const officialTracking of payload.officials) {
+      this.updateOfficialMarker(officialTracking);
+    }
+  }
+
+  private updateOfficialMarker(officialTracking: OfficialTracking): void {
+    const knownOfficial = this.officialsById.get(officialTracking.id_official);
+    const entityId = officialTracking.id_entity ?? knownOfficial?.id_entity ?? null;
+
+    if (knownOfficial && entityId !== null) {
+      knownOfficial.id_entity = entityId;
+    }
+
+    if (!this.showRealtimeOfficials || !this.isOfficialVisibleForFilters(officialTracking.id_official, entityId)) {
+      this.removeOfficialMarker(officialTracking.id_official);
+      return;
+    }
+
+    const latLng = L.latLng(officialTracking.latitude, officialTracking.longitude);
+    const existingMarker = this.officialMarkers.get(officialTracking.id_official);
+
+    if (!existingMarker) {
+      const marker = L.marker(latLng, {
+        icon: this.buildOfficialIcon(officialTracking.gps_active !== false),
+        draggable: false
+      });
+      marker.bindPopup(this.buildOfficialPopupContent(officialTracking));
+      this.trackingLayer.addLayer(marker);
+      this.officialMarkers.set(officialTracking.id_official, marker);
+      return;
+    }
+
+    existingMarker.setLatLng(latLng);
+    existingMarker.setIcon(this.buildOfficialIcon(officialTracking.gps_active !== false));
+    existingMarker.setPopupContent(this.buildOfficialPopupContent(officialTracking));
+  }
+
+  private buildOfficialIcon(isOnline: boolean): L.DivIcon {
+    const className = isOnline ? 'official-marker' : 'official-marker official-marker--offline';
+    return L.divIcon({ className });
+  }
+
+  private buildOfficialPopupContent(officialTracking: OfficialTracking): string {
+    const lastUpdate = officialTracking.last_gps_update
+      ? new Date(officialTracking.last_gps_update).toLocaleString()
+      : 'Sin dato';
+    const gpsStatus = officialTracking.gps_active === false ? 'Sin conexión' : 'Activo';
+    return `<strong>Funcionario #${officialTracking.id_official}</strong><br>Última actualización: ${lastUpdate}<br>Estado GPS: ${gpsStatus}`;
+  }
+
+  private isOfficialVisibleForFilters(idOfficial: number, entityId: number | null): boolean {
+    if (this.selectedEntityFilter == null) return true;
+    if (entityId != null) return entityId === this.selectedEntityFilter;
+    const knownOfficial = this.officialsById.get(idOfficial);
+    return knownOfficial?.id_entity === this.selectedEntityFilter;
+  }
+
+  private removeOfficialMarker(idOfficial: number): void {
+    const marker = this.officialMarkers.get(idOfficial);
+    if (!marker) return;
+    this.trackingLayer.removeLayer(marker);
+    this.officialMarkers.delete(idOfficial);
+  }
+
+  private rebuildVisibleTrackingMarkers(): void {
+    this.trackingLayer.clearLayers();
+    const existingEntries = Array.from(this.officialMarkers.entries());
+    this.officialMarkers.clear();
+
+    for (const [idOfficial, marker] of existingEntries) {
+      const knownOfficial = this.officialsById.get(idOfficial);
+      const entityId = knownOfficial?.id_entity ?? null;
+      if (!this.showRealtimeOfficials || !this.isOfficialVisibleForFilters(idOfficial, entityId)) {
+        continue;
+      }
+      this.trackingLayer.addLayer(marker);
+      this.officialMarkers.set(idOfficial, marker);
+    }
   }
 }

@@ -39,6 +39,19 @@ export interface Official {
   gps_active: boolean;
 }
 
+export interface OfficialTracking {
+  id_official: number;
+  id_entity?: number | null;
+  latitude: number;
+  longitude: number;
+  last_gps_update?: IsoDateString | null;
+  gps_active?: boolean;
+}
+
+export interface TrackingPayload {
+  officials: OfficialTracking[];
+}
+
 export interface Citizen {
   id_citizen: number;
   name: string;

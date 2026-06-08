@@ -61,6 +61,10 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
   }
  
   ngOnChanges(changes: SimpleChanges): void {
+    if (this.form && changes['item']) {
+      this.syncFormWithItem();
+    }
+
     if (this.form && changes['selectOptions']) {
       this.normalizeSelectControls();
     }
@@ -76,13 +80,7 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
     });
  
     this.form = this.fb.group(group);
- 
-    if (this.item && this.config.hasFile && this.config.fileField) {
-      const fileField = this.config.fields.find((f) => f.key === this.config.fileField);
-      if (fileField && this.item[`${this.config.fileField}_url`]) {
-        this.previewUrls.set(this.config.fileField, this.item[`${this.config.fileField}_url`]);
-      }
-    }
+    this.syncFormWithItem();
   }
  
   onFileSelected(files: File[], fieldKey: string): void {
@@ -332,6 +330,27 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
  
     const matchingOption = this.getSelectOptions(field).find((option) => String(option.value) === String(value));
     return matchingOption ? matchingOption.value : value;
+  }
+
+  private syncFormWithItem(): void {
+    const formValues = this.config.fields.reduce<Record<string, any>>((acc, field) => {
+      acc[field.key] = this.normalizeSelectValue(field, this.item?.[field.key] ?? '');
+      return acc;
+    }, {});
+
+    this.form.reset(formValues, { emitEvent: false });
+    this.duplicateError = '';
+    this.selectedFiles.clear();
+    this.previewUrls.clear();
+
+    if (this.item && this.config.hasFile && this.config.fileField) {
+      const fileField = this.config.fields.find((f) => f.key === this.config.fileField);
+      if (fileField && this.item[`${this.config.fileField}_url`]) {
+        this.previewUrls.set(this.config.fileField, this.item[`${this.config.fileField}_url`]);
+      }
+    }
+
+    this.cdr.markForCheck();
   }
  
   getFieldError(fieldKey: string): string {
