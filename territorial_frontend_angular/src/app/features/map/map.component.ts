@@ -293,8 +293,35 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     `.leaflet-container { min-height: 640px; width: 100%; border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }`,
     `.map-point-marker { width: 16px; height: 16px; border: 2px solid #ffffff; border-radius: 50%; background: var(--color-danger); box-shadow: 0 0 0 5px rgba(239, 35, 60, 0.16); }`,
     `.map-annotation-marker { width: 20px; height: 20px; border: 2px solid #fff; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 5px rgba(245, 158, 11, 0.25); }`,
-    `.official-marker { width: 16px; height: 16px; border: 2px solid #fff; border-radius: 50%; background: #10b981; box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.25); transition: opacity 0.2s ease, filter 0.2s ease; }`,
-    `.official-marker--offline { opacity: 0.45; filter: grayscale(1); }`,
+    `.official-marker {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      border: 4px solid #ffffff;
+      background: #00ff2a;
+      box-shadow:
+        0 0 0 10px rgba(0,255,42,.35),
+        0 0 30px rgba(0,255,42,.8);
+      animation: pulseOfficial 1.2s infinite;
+    }`,
+    `@keyframes pulseOfficial {
+
+      0% {
+        transform: scale(1);
+      }
+
+      50% {
+        transform: scale(1.25);
+      }
+
+      100% {
+        transform: scale(1);
+      }
+    }`,
+    `.official-marker--offline {
+      opacity: .45;
+      filter: grayscale(1);
+    }`,
     `.annotation-cursor, .annotation-cursor .leaflet-interactive { cursor: crosshair !important; }`,
     `.annotation-mode-hint { color: var(--color-primary); font-weight: 500; }`,
     `@media (max-width: 980px) { .map-page { grid-template-columns: 1fr; } }`,
@@ -369,6 +396,11 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private trackingLayer = L.layerGroup();
   private officialsById = new Map<number, Official>();
   private officialMarkers = new Map<number, L.Marker>();
+  private simulatedOfficials = new Map<number, {
+    latitude: number;
+    longitude: number;
+    gps_active: boolean;
+  }>();
   private polygonPoints: L.LatLng[] = [];
   private polygonMarkers: L.Marker[] = [];
   private polygonLine: L.Polyline | null = null;
@@ -405,6 +437,10 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     this.loadAnnotationFormData();
     this.loadOfficialsBaseData();
     this.initializeTracking();
+    setTimeout(() => {
+      this.initializeDemoTracking();
+    }, 1500);
+
     this.editingLayer.addTo(this.map);
   }
 
@@ -1206,6 +1242,22 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       });
   }
 
+  private initializeDemoTracking(): void {
+    for (const official of this.officialsById.values()) {
+      const latitude = 5.0689 + ((Math.random() - 0.5) * 0.02);
+      const longitude = -75.5174 + ((Math.random() - 0.5) * 0.02);
+      const gps_active = Math.random() > 0.2;
+
+      this.simulatedOfficials.set(official.id_official, {
+        latitude,
+        longitude,
+        gps_active
+      });
+
+      this.updateOfficialMarker(official, latitude, longitude, gps_active);
+    }
+  }
+
   private initializeTracking(): void {
     this.trackingService
       .listenTracking()
@@ -1237,7 +1289,45 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  private updateOfficialMarker(officialTracking: OfficialTracking): void {
+  private updateOfficialMarker(officialTracking: OfficialTracking): void;
+  private updateOfficialMarker(
+    official: Official,
+    latitude: number,
+    longitude: number,
+    gps_active: boolean
+  ): void;
+  private updateOfficialMarker(
+    officialOrTracking: Official | OfficialTracking,
+    latitude?: number,
+    longitude?: number,
+    gps_active?: boolean
+  ): void {
+    if (typeof latitude === 'number' && typeof longitude === 'number' && typeof gps_active === 'boolean' && 'name' in officialOrTracking) {
+      const official = officialOrTracking;
+      const officialId = official.id_official;
+      const entityName = this.trackingEntities.find((entity) => entity.id_entity === official.id_entity)?.name ?? `#${official.id_entity}`;
+      const gpsStatus = gps_active ? 'GPS activo' : 'Sin conexión';
+      const popupContent = `<strong>${official.name}</strong><br>Entidad: ${entityName}<br>Estado: ${gpsStatus}`;
+      const existingMarker = this.officialMarkers.get(officialId);
+
+      if (existingMarker) {
+        existingMarker.setLatLng([latitude, longitude]);
+        existingMarker.setIcon(this.buildOfficialIcon(gps_active));
+        existingMarker.bindPopup(popupContent);
+        return;
+      }
+
+      const marker = L.marker([latitude, longitude], {
+        icon: this.buildOfficialIcon(gps_active),
+        draggable: false
+      });
+      marker.bindPopup(popupContent);
+      this.officialMarkers.set(officialId, marker);
+      marker.addTo(this.trackingLayer);
+      return;
+    }
+
+    const officialTracking = officialOrTracking as OfficialTracking;
     const knownOfficial = this.officialsById.get(officialTracking.id_official);
     const entityId = officialTracking.id_entity ?? knownOfficial?.id_entity ?? null;
 
@@ -1250,28 +1340,53 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       return;
     }
 
-    const latLng = L.latLng(officialTracking.latitude, officialTracking.longitude);
     const existingMarker = this.officialMarkers.get(officialTracking.id_official);
 
-    if (!existingMarker) {
-      const marker = L.marker(latLng, {
-        icon: this.buildOfficialIcon(officialTracking.gps_active !== false),
-        draggable: false
-      });
-      marker.bindPopup(this.buildOfficialPopupContent(officialTracking));
-      this.trackingLayer.addLayer(marker);
-      this.officialMarkers.set(officialTracking.id_official, marker);
+    if (existingMarker) {
+      existingMarker.setLatLng([officialTracking.latitude, officialTracking.longitude]);
+      existingMarker.setIcon(this.buildOfficialIcon(officialTracking.gps_active !== false));
+      existingMarker.bindPopup(this.buildOfficialPopupContent(officialTracking));
       return;
     }
 
-    existingMarker.setLatLng(latLng);
-    existingMarker.setIcon(this.buildOfficialIcon(officialTracking.gps_active !== false));
-    existingMarker.setPopupContent(this.buildOfficialPopupContent(officialTracking));
+    const marker = L.marker([officialTracking.latitude, officialTracking.longitude], {
+      icon: this.buildOfficialIcon(officialTracking.gps_active !== false),
+      draggable: false
+    });
+    marker.bindPopup(this.buildOfficialPopupContent(officialTracking));
+    this.officialMarkers.set(officialTracking.id_official, marker);
+    marker.addTo(this.trackingLayer);
   }
 
-  private buildOfficialIcon(isOnline: boolean): L.DivIcon {
-    const className = isOnline ? 'official-marker' : 'official-marker official-marker--offline';
-    return L.divIcon({ className });
+  private buildOfficialIcon(gps_active: boolean): L.DivIcon {
+    return L.divIcon({
+      className: '',
+      html: `
+        <div style="
+          width: 62px;
+          height: 62px;
+          border-radius: 50%;
+          background:
+            ${gps_active ? '#00ff2a' : '#9ca3af'};
+          border: 4px solid white;
+          box-shadow:
+            0 0 0 12px rgba(0,255,0,.25),
+            0 0 35px rgba(0,255,0,.6);
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          font-size:28px;
+          cursor:pointer;
+          user-select:none;
+          transition: all .25s ease;
+        ">
+          👤
+        </div>
+      `,
+      iconSize: [62, 62],
+      iconAnchor: [31, 31],
+      popupAnchor: [0, -30]
+    });
   }
 
   private buildOfficialPopupContent(officialTracking: OfficialTracking): string {
