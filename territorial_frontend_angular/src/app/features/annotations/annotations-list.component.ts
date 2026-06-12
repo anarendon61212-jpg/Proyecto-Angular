@@ -1,8 +1,10 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, ChangeDetectorRef } from '@angular/core';
 import { FormControl, FormGroup, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
+
+import { AuthService } from '../../core/auth/auth.service';
 
 import {
   Annotation,
@@ -14,6 +16,7 @@ import {
   Entity,
   Neighborhood,
   TerritorialStatus,
+  Vote,
   VotePayload
 } from '../../core/models/territorial.models';
 import {
@@ -229,7 +232,9 @@ import { normalizeStatus } from '../../core/utils/status.utils';
               Comentario
               <textarea formControlName="comment" rows="3" placeholder="Agrega un comentario"></textarea>
             </label>
-            <button type="submit" class="app-button app-button--primary">Enviar voto</button>
+            <button type="submit" class="app-button app-button--primary">
+              {{ currentUserVote ? 'Editar calificación' : 'Enviar voto' }}
+            </button>
           </form>
           <div class="rating-summary">
             <p><strong>Promedio:</strong> {{ selectedAnnotation.average_rating ?? 0 }} ⭐</p>
@@ -277,6 +282,8 @@ export class AnnotationsListComponent {
   private readonly annotationCategoryService = inject(AnnotationCategoryCrudService);
   private readonly voteService = inject(VoteCrudService);
   private readonly toastService = inject(ToastService);
+  private readonly authService = inject(AuthService);
+  private readonly cdr = inject(ChangeDetectorRef);
 
   annotations: Annotation[] = [];
   filteredAnnotations: Annotation[] = [];
@@ -286,6 +293,7 @@ export class AnnotationsListComponent {
   entities: Entity[] = [];
   selectedAnnotation: AnnotationDetail | null = null;
   photoFiles: File[] = [];
+  currentUserVote: Vote | null = null;
 
   filters = {
     search: '',
@@ -477,7 +485,20 @@ export class AnnotationsListComponent {
 
   selectAnnotation(annotationId: number): void {
     this.annotationService.getById(annotationId).subscribe((annotation) => {
-      this.selectedAnnotation = annotation as AnnotationDetail;
+      const annotationDetail = annotation as AnnotationDetail;
+      annotationDetail.status = normalizeStatus(annotationDetail.status);
+      this.selectedAnnotation = annotationDetail;
+      this.cdr.markForCheck();
+      
+      if (annotationDetail.id_citizen) {
+        this.citizenService.getById(annotationDetail.id_citizen).subscribe((citizen) => {
+          this.selectedAnnotation = { ...this.selectedAnnotation!, citizen };
+          this.cdr.markForCheck();
+        });
+      }
+      
+      this.checkUserVote(annotationId);
+      this.calculateRatingStats(annotationId);
       this.toastService.info('Detalle cargado', `Detalle de anotación #${annotationId} cargado.`);
     });
   }
@@ -487,23 +508,61 @@ export class AnnotationsListComponent {
       return;
     }
 
-    const payload: VotePayload = {
-      id_annotation: this.selectedAnnotation.id_annotation,
-      id_citizen: this.selectedAnnotation.id_citizen,
-      stars: Number(this.voteForm.controls.stars.value),
-      comment: this.voteForm.controls.comment.value || undefined
-    };
+    const currentUser = this.authService.currentUser();
+    if (!currentUser || !currentUser.email) {
+      this.toastService.danger('No autenticado', 'Debe iniciar sesión para calificar anotaciones.');
+      return;
+    }
 
-    this.voteService.create(payload).subscribe(() => {
-      this.toastService.success('Voto guardado', 'Tu calificación se registró correctamente.');
-      this.voteForm.reset({ stars: 5, comment: '' });
-      this.selectAnnotation(this.selectedAnnotation!.id_annotation);
+    this.citizenService.list({ email: currentUser.email }).pipe(
+      catchError(() => of({ items: [], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+    ).subscribe((citizens) => {
+      const citizenArray = Array.isArray(citizens) ? citizens : (citizens?.items || []);
+      if (citizenArray.length === 0) {
+        this.toastService.danger('Ciudadano no encontrado', 'No se encontró un ciudadano con tu email en el sistema.');
+        return;
+      }
+
+      const citizenId = citizenArray[0]?.id_citizen;
+      if (!citizenId) {
+        this.toastService.danger('Ciudadano no encontrado', 'No se encontró un ciudadano con tu email en el sistema.');
+        return;
+      }
+
+      if (!this.selectedAnnotation) {
+        return;
+      }
+
+      const payload: VotePayload = {
+        id_annotation: this.selectedAnnotation.id_annotation,
+        id_citizen: citizenId,
+        stars: Number(this.voteForm.controls.stars.value),
+        comment: this.voteForm.controls.comment.value || undefined
+      };
+
+      if (this.currentUserVote) {
+        this.voteService.update(this.currentUserVote.id_vote, payload).subscribe(() => {
+          this.toastService.success('Calificación actualizada', 'Tu calificación se actualizó correctamente.');
+          this.voteForm.reset({ stars: 5, comment: '' });
+          this.selectAnnotation(this.selectedAnnotation!.id_annotation);
+        });
+      } else {
+        this.voteService.create(payload).subscribe(() => {
+          this.toastService.success('Voto guardado', 'Tu calificación se registró correctamente.');
+          this.voteForm.reset({ stars: 5, comment: '' });
+          this.selectAnnotation(this.selectedAnnotation!.id_annotation);
+        });
+      }
     });
   }
 
   filterAnnotations(): void {
+    if (this.annotations.length === 0) {
+      return;
+    }
+
     const search = this.filters.search.trim().toLowerCase();
-    const neighborhoodId = Number(this.filters.neighborhoodId || 0);
+    const neighborhoodId = this.filters.neighborhoodId ? Number(this.filters.neighborhoodId) : null;
     const status = this.filters.status;
 
     this.filteredAnnotations = this.annotations.filter((annotation) => {
@@ -513,6 +572,8 @@ export class AnnotationsListComponent {
       const matchesStatus = !status || annotation.status === status;
       return matchesSearch && matchesNeighborhood && matchesStatus;
     });
+
+    this.cdr.markForCheck();
   }
 
   private loadData(): void {
@@ -533,12 +594,16 @@ export class AnnotationsListComponent {
         catchError(() => of({ items: [], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
       )
     }).subscribe(({ annotations, categories, neighborhoods, citizens, entities }) => {
-      this.annotations = annotations.items;
+      this.annotations = annotations.items.map(annotation => ({
+        ...annotation,
+        status: normalizeStatus(annotation.status)
+      }));
       this.filteredAnnotations = [...this.annotations];
       this.categories = categories.items;
       this.neighborhoods = neighborhoods.items;
       this.citizens = citizens.items;
       this.entities = entities.items;
+      this.cdr.markForCheck();
     });
   }
 
@@ -554,5 +619,74 @@ export class AnnotationsListComponent {
       interestedEntityIds: []
     });
     this.photoFiles = [];
+  }
+
+  private checkUserVote(annotationId: number): void {
+    const currentUser = this.authService.currentUser();
+    if (!currentUser || !currentUser.email) {
+      this.currentUserVote = null;
+      this.voteForm.reset({ stars: 5, comment: '' });
+      return;
+    }
+
+    this.citizenService.list({ email: currentUser.email }).pipe(
+      catchError(() => of({ items: [], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+    ).subscribe((citizens) => {
+      const citizenArray = Array.isArray(citizens) ? citizens : (citizens?.items || []);
+      if (citizenArray.length === 0) {
+        this.currentUserVote = null;
+        this.voteForm.reset({ stars: 5, comment: '' });
+        return;
+      }
+
+      const citizenId = citizenArray[0]?.id_citizen;
+      if (!citizenId) {
+        this.currentUserVote = null;
+        this.voteForm.reset({ stars: 5, comment: '' });
+        return;
+      }
+      
+      this.voteService.list({
+        id_annotation: annotationId,
+        id_citizen: citizenId
+      }).pipe(
+        catchError(() => of([]))
+      ).subscribe((votes) => {
+        const voteArray = Array.isArray(votes) ? votes : (votes?.items || []);
+        this.currentUserVote = voteArray.length > 0 ? voteArray[0] : null;
+        
+        if (this.currentUserVote) {
+          this.voteForm.patchValue({
+            stars: this.currentUserVote.stars,
+            comment: this.currentUserVote.comment || ''
+          });
+        } else {
+          this.voteForm.reset({ stars: 5, comment: '' });
+        }
+      });
+    });
+  }
+
+  private calculateRatingStats(annotationId: number): void {
+    this.voteService.list({ id_annotation: annotationId }).pipe(
+      catchError(() => of([]))
+    ).subscribe((votes) => {
+      const voteArray = Array.isArray(votes) ? votes : (votes?.items || []);
+      if (voteArray.length > 0) {
+        const totalStars = voteArray.reduce((sum, vote) => sum + vote.stars, 0);
+        const average = totalStars / voteArray.length;
+        this.selectedAnnotation = {
+          ...this.selectedAnnotation!,
+          average_rating: Math.round(average * 10) / 10,
+          votes_count: voteArray.length
+        };
+      } else {
+        this.selectedAnnotation = {
+          ...this.selectedAnnotation!,
+          average_rating: 0,
+          votes_count: 0
+        };
+      }
+    });
   }
 }
