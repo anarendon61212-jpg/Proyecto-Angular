@@ -3,20 +3,24 @@ import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, inject, 
 import { FormControl, FormGroup, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import * as L from 'leaflet';
 import { combineLatest, forkJoin, Observable, of, Subject, takeUntil } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { catchError, map } from 'rxjs/operators';
 
 import {
+  Annotation,
+  AnnotationCategory,
   AnnotationCategoryPayload,
   AnnotationPayload,
   Category,
   Citizen,
+  Evidence,
   Entity,
   Neighborhood,
   Official,
   OfficialTracking,
   Point,
   PointPayload,
-  TrackingPayload
+  TrackingPayload,
+  Vote
 } from '../../core/models/territorial.models';
 import {
   AnnotationCategoryCrudService,
@@ -28,8 +32,10 @@ import {
   InterestedPartyCrudService,
   NeighborhoodCrudService,
   OfficialCrudService,
-  PointCrudService
+  PointCrudService,
+  VoteCrudService
 } from '../../core/api/territorial-crud.services';
+import { ApiClient } from '../../core/api/api-client.service';
 import { FileUploadComponent } from '../../shared/components/file-upload/file-upload.component';
 import { ToastService } from '../../shared/services/toast.service';
 import { TrackingService } from '../../core/services/tracking.service';
@@ -38,6 +44,19 @@ interface NeighborhoodShape {
   id: number;
   name: string;
   coordinates: L.LatLngTuple[];
+}
+
+interface CategoryTreeNode {
+  category: Category;
+  children: CategoryTreeNode[];
+}
+
+interface AnnotationPopupData {
+  annotation: Annotation | null;
+  evidences: Evidence[];
+  categories: Category[];
+  averageVotes: number | null;
+  votesCount: number;
 }
 
 const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
@@ -109,6 +128,32 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
         </div>
 
         <div class="panel-section">
+          <h3>Categorías</h3>
+          <div class="category-filters-header">
+            <button
+              type="button"
+              class="app-button app-button--secondary app-button--small"
+              [disabled]="selectedFilterCategoryIds.size === 0"
+              (click)="clearCategoryFilters()"
+            >
+              Limpiar filtros
+            </button>
+          </div>
+          <p class="category-filter-hint" *ngIf="selectedFilterCategoryIds.size > 0">
+            Selección múltiple activa (OR): se muestran anotaciones de cualquiera de las categorías seleccionadas o sus descendientes.
+          </p>
+          <div class="category-tree" *ngIf="categoryFilterTree.length > 0; else noCategoriesTemplate">
+            <ng-container *ngFor="let root of categoryFilterTree">
+              <ng-container *ngTemplateOutlet="categoryNodeTemplate; context: { $implicit: root, level: 0 }"></ng-container>
+            </ng-container>
+          </div>
+          <ng-template #noCategoriesTemplate>
+            <p class="map-info-message">No hay categorías disponibles para filtrar.</p>
+          </ng-template>
+
+        </div>
+
+        <div class="panel-section">
           <h3>Funcionarios en tiempo real</h3>
           <label>
             <input
@@ -173,9 +218,45 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
           </div>
         </div>
 
+        <p class="map-info-message" *ngIf="showPoints && pointFilters.annotation && !hasAnnotationPoints">
+          No existen anotaciones registradas.
+        </p>
+        <p class="map-info-message" *ngIf="showPoints && pointFilters.annotation && hasAnnotationPoints && visibleAnnotationCount === 0">
+          No hay anotaciones para los filtros seleccionados.
+        </p>
+
         <div #mapContainer class="leaflet-container" [class.annotation-cursor]="isAnnotationMode"></div>
       </section>
     </div>
+
+    <ng-template #categoryNodeTemplate let-node let-level="level">
+      <div class="category-tree-node" [style.padding-left.px]="level * 14">
+        <button
+          type="button"
+          class="category-toggle"
+          *ngIf="node.children.length > 0"
+          (click)="toggleCategoryNode(node.category.id_category)"
+        >
+          {{ isCategoryNodeExpanded(node.category.id_category) ? '▾' : '▸' }}
+        </button>
+        <span class="category-toggle category-toggle--placeholder" *ngIf="node.children.length === 0"></span>
+        <label>
+          <input
+            type="checkbox"
+            [checked]="isCategorySelected(node.category.id_category)"
+            (change)="toggleCategoryFilter(node.category.id_category, $any($event.target).checked)"
+          />
+          <span>{{ node.category.name }}</span>
+          <span class="category-count">{{ getCategoryTotalCount(node.category.id_category) }}</span>
+        </label>
+      </div>
+
+      <div *ngIf="node.children.length > 0 && isCategoryNodeExpanded(node.category.id_category)">
+        <ng-container *ngFor="let child of node.children">
+          <ng-container *ngTemplateOutlet="categoryNodeTemplate; context: { $implicit: child, level: level + 1 }"></ng-container>
+        </ng-container>
+      </div>
+    </ng-template>
 
     <!-- CU-12: Modal de nueva anotación georreferenciada -->
     <div class="ann-overlay" *ngIf="annotationModalOpen" (click)="closeAnnotationModal()">
@@ -282,6 +363,15 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     `.panel-section { display: grid; gap: 0.75rem; }`,
     `.panel-section h3 { margin: 0; font-size: 0.95rem; }`,
     `.panel-section label { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; color: var(--color-ink); }`,
+    `.category-filters-header { display: flex; justify-content: flex-end; }`,
+    `.category-filter-hint { margin: 0; color: var(--color-ink-muted, #6b7280); font-size: 0.82rem; line-height: 1.35; }`,
+    `.category-tree { border: 1px solid var(--color-border); border-radius: 0.875rem; padding: 0.6rem; background: #fff; max-height: 260px; overflow-y: auto; display: grid; gap: 0.25rem; }`,
+    `.category-tree-node { display: flex; align-items: center; gap: 0.4rem; }`,
+    `.category-tree-node label { flex: 1; gap: 0.5rem; font-size: 0.87rem; justify-content: space-between; }`,
+    `.category-toggle { border: none; background: transparent; cursor: pointer; color: var(--color-ink-muted, #6b7280); width: 1.1rem; padding: 0; line-height: 1; }`,
+    `.category-toggle--placeholder { display: inline-block; }`,
+    `.category-count { font-size: 0.78rem; color: var(--color-ink-muted, #6b7280); margin-left: auto; }`,
+    `.map-info-message { margin: 0; color: var(--color-ink-muted, #6b7280); font-size: 0.9rem; }`,
     `select { width: 100%; border: 1px solid var(--color-border); border-radius: 12px; background: white; color: var(--color-ink); font: inherit; padding: 0.8rem 0.85rem; }`,
     `.map-view { display: grid; gap: 1rem; min-height: calc(100vh - 3rem); padding: 1.25rem; }`,
     `.map-header { align-items: center; display: flex; justify-content: space-between; gap: 1rem; }`,
@@ -348,6 +438,7 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     `.ann-actions { display: flex; justify-content: flex-end; gap: 0.75rem; padding-top: 0.5rem; }`,
     `.ann-form label { display: grid; gap: 0.4rem; font-size: 0.9rem; font-weight: 500; }`,
     `.ann-form input, .ann-form select, .ann-form textarea { border: 1px solid var(--color-border); border-radius: 0.75rem; padding: 0.75rem; font: inherit; background: white; color: var(--color-ink); }`,
+    `.app-button--small { font-size: 0.8rem; padding: 0.45rem 0.7rem; }`,
     `.ann-form textarea { resize: vertical; }`,
     `.readonly-input { background: var(--color-surface, #f9fafb) !important; color: var(--color-ink-muted, #6b7280) !important; cursor: default; }`,
     `@media (max-width: 640px) { .ann-form-grid { grid-template-columns: 1fr; } .ann-extras-grid { grid-template-columns: 1fr; } }`
@@ -368,7 +459,9 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private readonly evidenceService = inject(EvidenceCrudService);
   private readonly interestedPartyService = inject(InterestedPartyCrudService);
   private readonly annotationCategoryService = inject(AnnotationCategoryCrudService);
+  private readonly voteService = inject(VoteCrudService);
   private readonly officialService = inject(OfficialCrudService);
+  private readonly apiClient = inject(ApiClient);
   private readonly trackingService = inject(TrackingService);
   private readonly toastService = inject(ToastService);
 
@@ -421,6 +514,34 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   trackingEntities: Entity[] = [];
   selectedEntityFilter: number | null = null;
   showRealtimeOfficials = true;
+  categoryFilterTree: CategoryTreeNode[] = [];
+  selectedFilterCategoryIds = new Set<number>();
+  expandedFilterCategoryIds = new Set<number>();
+  categoryDirectCount = new Map<number, number>();
+  categoryTotalCount = new Map<number, number>();
+  visibleAnnotationCount = 0;
+  hasAnnotationPoints = false;
+
+  private readonly defaultAnnotationMarkerStyle = {
+    background: '#f59e0b',
+    shadow: 'rgba(245, 158, 11, 0.25)'
+  };
+  private readonly rootPalette = [
+    { background: '#f59e0b', shadow: 'rgba(245, 158, 11, 0.25)' },
+    { background: '#2563eb', shadow: 'rgba(37, 99, 235, 0.25)' },
+    { background: '#16a34a', shadow: 'rgba(22, 163, 74, 0.25)' },
+    { background: '#dc2626', shadow: 'rgba(220, 38, 38, 0.25)' },
+    { background: '#7c3aed', shadow: 'rgba(124, 58, 237, 0.25)' },
+    { background: '#0891b2', shadow: 'rgba(8, 145, 178, 0.25)' },
+    { background: '#ea580c', shadow: 'rgba(234, 88, 12, 0.25)' }
+  ];
+  private allCategories: Category[] = [];
+  private allAnnotationCategories: AnnotationCategory[] = [];
+  private categoriesById = new Map<number, Category>();
+  private categoryChildrenMap = new Map<number | null, Category[]>();
+  private categoryDescendantsMap = new Map<number, Set<number>>();
+  private categoryColorMap = new Map<number, { background: string; shadow: string }>();
+  private annotationCategoryMap = new Map<number, Set<number>>();
 
   annotationForm = new FormGroup({
     id_citizen: new FormControl<number | null>(null),
@@ -470,6 +591,40 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   togglePointType(type: keyof typeof this.pointFilters, checked: boolean): void {
     this.pointFilters[type] = checked;
     this.refreshMapLayers();
+  }
+
+  toggleCategoryFilter(categoryId: number, checked: boolean): void {
+    if (checked) {
+      this.selectedFilterCategoryIds.add(categoryId);
+    } else {
+      this.selectedFilterCategoryIds.delete(categoryId);
+    }
+    this.refreshMapLayers();
+  }
+
+  clearCategoryFilters(): void {
+    this.selectedFilterCategoryIds.clear();
+    this.refreshMapLayers();
+  }
+
+  toggleCategoryNode(categoryId: number): void {
+    if (this.expandedFilterCategoryIds.has(categoryId)) {
+      this.expandedFilterCategoryIds.delete(categoryId);
+      return;
+    }
+    this.expandedFilterCategoryIds.add(categoryId);
+  }
+
+  isCategoryNodeExpanded(categoryId: number): boolean {
+    return this.expandedFilterCategoryIds.has(categoryId);
+  }
+
+  isCategorySelected(categoryId: number): boolean {
+    return this.selectedFilterCategoryIds.has(categoryId);
+  }
+
+  getCategoryTotalCount(categoryId: number): number {
+    return this.categoryTotalCount.get(categoryId) ?? 0;
   }
 
   toggleRealtimeOfficials(enabled: boolean): void {
@@ -925,6 +1080,19 @@ export class MapComponent implements AfterViewInit, OnDestroy {
           // Add the new Point (index 0) to this.points and refresh the map immediately
           const newPoint = results[0] as Point;
           if (newPoint?.id_point != null) {
+            const newAnnotationId = annotation.id_annotation;
+            const selectedCategories = new Set<number>(categoryIds);
+            this.annotationCategoryMap.set(newAnnotationId, selectedCategories);
+
+            for (const categoryId of categoryIds) {
+              this.allAnnotationCategories.push({
+                id_annotation_category: -(Date.now() + categoryId),
+                id_annotation: newAnnotationId,
+                id_category: categoryId
+              });
+            }
+            this.buildCategoryCounts();
+
             this.points = [...this.points, newPoint];
             this.refreshMapLayers();
           }
@@ -1030,6 +1198,171 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     });
   }
 
+  private loadCategoryFilterData(): Observable<{
+    categories: Category[];
+    annotationCategories: AnnotationCategory[];
+  }> {
+    return forkJoin({
+      categories: this.categoryService.listCollection().pipe(
+        catchError(() => of({ items: [] as Category[], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+      ),
+      annotationCategories: this.annotationCategoryService.listCollection().pipe(
+        catchError(() => of({ items: [] as AnnotationCategory[], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+      )
+    }).pipe(
+      map(({ categories, annotationCategories }) => ({
+        categories: categories.items,
+        annotationCategories: annotationCategories.items
+      })),
+      catchError(() => of({
+        categories: [] as Category[],
+        annotationCategories: [] as AnnotationCategory[]
+      }))
+    );
+  }
+
+  private initializeCategoryFilterState(categories: Category[], annotationCategories: AnnotationCategory[]): void {
+    this.allCategories = categories;
+    this.allAnnotationCategories = annotationCategories;
+    this.categoriesById = new Map(categories.map((cat) => [cat.id_category, cat]));
+
+    this.categoryChildrenMap.clear();
+    for (const category of categories) {
+      const parentId = category.id_parent_category ?? null;
+      const bucket = this.categoryChildrenMap.get(parentId) ?? [];
+      bucket.push(category);
+      this.categoryChildrenMap.set(parentId, bucket);
+    }
+
+    this.annotationCategoryMap.clear();
+    for (const relation of annotationCategories) {
+      const categoryBucket = this.annotationCategoryMap.get(relation.id_annotation) ?? new Set<number>();
+      categoryBucket.add(relation.id_category);
+      this.annotationCategoryMap.set(relation.id_annotation, categoryBucket);
+    }
+
+    this.buildCategoryDescendantsMap();
+    this.buildCategoryCounts();
+    this.buildCategoryColorMap();
+    this.categoryFilterTree = this.buildCategoryTree(null);
+    this.expandAllFilterRoots();
+  }
+
+  private buildCategoryTree(parentId: number | null): CategoryTreeNode[] {
+    const children = this.categoryChildrenMap.get(parentId) ?? [];
+    return children
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((category) => ({
+        category,
+        children: this.buildCategoryTree(category.id_category)
+      }));
+  }
+
+  private expandAllFilterRoots(): void {
+    for (const root of this.categoryFilterTree) {
+      this.expandedFilterCategoryIds.add(root.category.id_category);
+    }
+  }
+
+  private buildCategoryDescendantsMap(): void {
+    this.categoryDescendantsMap.clear();
+
+    const walk = (categoryId: number): Set<number> => {
+      const descendants = new Set<number>([categoryId]);
+      const children = this.categoryChildrenMap.get(categoryId) ?? [];
+      for (const child of children) {
+        const childSet = walk(child.id_category);
+        for (const id of childSet) descendants.add(id);
+      }
+      this.categoryDescendantsMap.set(categoryId, descendants);
+      return descendants;
+    };
+
+    for (const category of this.allCategories) {
+      if (!this.categoryDescendantsMap.has(category.id_category)) {
+        walk(category.id_category);
+      }
+    }
+  }
+
+  private buildCategoryCounts(): void {
+    this.categoryDirectCount.clear();
+    this.categoryTotalCount.clear();
+
+    for (const relation of this.allAnnotationCategories) {
+      this.categoryDirectCount.set(
+        relation.id_category,
+        (this.categoryDirectCount.get(relation.id_category) ?? 0) + 1
+      );
+    }
+
+    for (const category of this.allCategories) {
+      const descendants = this.categoryDescendantsMap.get(category.id_category) ?? new Set<number>([category.id_category]);
+      let total = 0;
+      for (const id of descendants) {
+        total += this.categoryDirectCount.get(id) ?? 0;
+      }
+      this.categoryTotalCount.set(category.id_category, total);
+    }
+  }
+
+  private buildCategoryColorMap(): void {
+    this.categoryColorMap.clear();
+    const roots = this.categoryChildrenMap.get(null) ?? [];
+    roots
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .forEach((root, index) => {
+        const palette = this.rootPalette[index % this.rootPalette.length];
+        this.categoryColorMap.set(root.id_category, palette);
+      });
+  }
+
+  private getExpandedSelectedCategoryIds(): Set<number> {
+    if (this.selectedFilterCategoryIds.size === 0) {
+      return new Set<number>();
+    }
+
+    const expanded = new Set<number>();
+    for (const selectedId of this.selectedFilterCategoryIds) {
+      const descendants = this.categoryDescendantsMap.get(selectedId) ?? new Set<number>([selectedId]);
+      for (const id of descendants) expanded.add(id);
+    }
+    return expanded;
+  }
+
+  private passesCategoryFilter(annotationId: number | null | undefined): boolean {
+    if (this.selectedFilterCategoryIds.size === 0) return true;
+    if (annotationId == null) return false;
+
+    const annotationCategories = this.annotationCategoryMap.get(annotationId);
+    if (!annotationCategories || annotationCategories.size === 0) return false;
+
+    const allowedCategories = this.getExpandedSelectedCategoryIds();
+    for (const id of annotationCategories) {
+      if (allowedCategories.has(id)) return true;
+    }
+    return false;
+  }
+
+  private getAnnotationMarkerStyle(annotationId: number | null | undefined): { background: string; shadow: string } {
+    if (annotationId == null) return this.defaultAnnotationMarkerStyle;
+    const categoryIds = this.annotationCategoryMap.get(annotationId);
+    if (!categoryIds || categoryIds.size === 0) return this.defaultAnnotationMarkerStyle;
+
+    for (const selectedCategory of categoryIds) {
+      let current = this.categoriesById.get(selectedCategory);
+      while (current) {
+        if (current.id_parent_category == null) {
+          return this.categoryColorMap.get(current.id_category) ?? this.defaultAnnotationMarkerStyle;
+        }
+        current = this.categoriesById.get(current.id_parent_category);
+      }
+    }
+    return this.defaultAnnotationMarkerStyle;
+  }
+
   // ── Map rendering ─────────────────────────────────────────────────────────
 
   private initializeMap(): void {
@@ -1063,13 +1396,19 @@ export class MapComponent implements AfterViewInit, OnDestroy {
 
   private loadTerritorialData(): void {
     combineLatest([
-      this.neighborhoodService.listCollection(),
-      this.pointService.listCollection()
+      this.neighborhoodService.listCollection().pipe(
+        catchError(() => of({ items: [] as Neighborhood[], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+      ),
+      this.pointService.listCollection().pipe(
+        catchError(() => of({ items: [] as Point[], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+      ),
+      this.loadCategoryFilterData()
     ])
       .pipe(takeUntil(this.destroy$))
-      .subscribe(([neighborhoodCollection, pointCollection]) => {
+      .subscribe(([neighborhoodCollection, pointCollection, categoryFilterData]) => {
         this.neighborhoods = neighborhoodCollection.items;
         this.points = pointCollection.items;
+        this.initializeCategoryFilterState(categoryFilterData.categories, categoryFilterData.annotationCategories);
         this.refreshMapLayers();
       });
   }
@@ -1079,6 +1418,8 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     this.pointLayer.clearLayers();
     this.annotationLayer.clearLayers();
     this.selectedNeighborhoodLayer.clearLayers();
+    this.visibleAnnotationCount = 0;
+    this.hasAnnotationPoints = this.points.some((point) => point.point_type === 'annotation' && point.id_annotation != null);
 
     if (this.showNeighborhoods) {
       this.renderNeighborhoodPolygons();
@@ -1154,17 +1495,24 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       if (!this.pointFilters[point.point_type as keyof typeof this.pointFilters]) continue;
 
       if (isAnnotationPoint) {
+        if (!this.passesCategoryFilter(point.id_annotation)) continue;
+        this.visibleAnnotationCount += 1;
+
+        const markerStyle = this.getAnnotationMarkerStyle(point.id_annotation);
         // Annotation markers → dedicated annotationLayer with amber icon
         const marker = L.marker([point.latitude, point.longitude], {
-          icon: L.divIcon({ className: 'map-annotation-marker' }),
+          icon: L.divIcon({
+            className: 'map-annotation-marker',
+            html: `<div style="width: 20px; height: 20px; border: 2px solid #fff; border-radius: 50%; background: ${markerStyle.background}; box-shadow: 0 0 0 5px ${markerStyle.shadow};"></div>`
+          }),
           draggable: false
         });
-
-        const popupContent = point.id_annotation != null
-          ? `<strong>Anotación #${point.id_annotation}</strong><br>Lat: ${point.latitude.toFixed(6)}<br>Lng: ${point.longitude.toFixed(6)}`
-          : `Tipo: annotation<br>ID punto: ${point.id_point}`;
-
-        marker.bindPopup(popupContent);
+        marker.on('click', () => {
+          if (point.id_annotation != null) {
+            this.openAnnotationPopup(marker, point.id_annotation, point);
+          }
+        });
+        marker.bindPopup(`Cargando anotación #${point.id_annotation ?? point.id_point}...`);
         this.annotationLayer.addLayer(marker);
       } else {
         // Other point types → general pointLayer (draggable)
@@ -1178,6 +1526,78 @@ export class MapComponent implements AfterViewInit, OnDestroy {
         this.pointLayer.addLayer(marker);
       }
     }
+  }
+
+  private openAnnotationPopup(marker: L.Marker, annotationId: number, point: Point): void {
+    marker.setPopupContent(`Cargando anotación #${annotationId}...`);
+
+    forkJoin({
+      annotation: this.annotationService.getById(annotationId).pipe(catchError(() => of(null))),
+      evidences: this.evidenceService.searchCollection({ id_annotation: annotationId }).pipe(
+        map((response) => response.items),
+        catchError(() => of([] as Evidence[]))
+      ),
+      votes: this.voteService.searchCollection({ id_annotation: annotationId }).pipe(
+        map((response) => response.items),
+        catchError(() => of([] as Vote[]))
+      )
+    })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(({ annotation, evidences, votes }) => {
+        const annotationCategoryIds = this.annotationCategoryMap.get(annotationId) ?? new Set<number>();
+        const categories = Array.from(annotationCategoryIds)
+          .map((categoryId) => this.categoriesById.get(categoryId))
+          .filter((category): category is Category => category != null);
+
+        const votesCount = votes.length;
+        const averageVotes = votesCount > 0
+          ? votes.reduce((sum, vote) => sum + vote.stars, 0) / votesCount
+          : null;
+
+        const popupData: AnnotationPopupData = {
+          annotation,
+          evidences,
+          categories,
+          averageVotes,
+          votesCount
+        };
+
+        marker.setPopupContent(this.buildAnnotationPopupHtml(annotationId, point, popupData));
+        marker.openPopup();
+      });
+  }
+
+  private buildAnnotationPopupHtml(annotationId: number, point: Point, data: AnnotationPopupData): string {
+    const description = data.annotation?.description?.trim() || 'Sin descripción registrada.';
+    const registrationDate = data.annotation?.registration_date
+      ? new Date(data.annotation.registration_date).toLocaleString()
+      : 'Sin fecha';
+    const categoriesHtml = data.categories.length > 0
+      ? data.categories.map((category) => category.name).join(', ')
+      : 'Sin categorías';
+    const votesHtml = data.averageVotes != null
+      ? `${data.averageVotes.toFixed(1)} / 5 (${data.votesCount} voto${data.votesCount === 1 ? '' : 's'})`
+      : 'Sin votos';
+    const evidencesHtml = data.evidences.length > 0
+      ? `<div style="display:grid;gap:0.35rem;">${data.evidences.map((evidence) => {
+          const url = this.apiClient.imageUrl(evidence.file_url);
+          const safeUrl = url.replace(/"/g, '&quot;');
+          return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">Evidencia #${evidence.id_evidence}</a>`;
+        }).join('')}</div>`
+      : 'Sin evidencias';
+
+    return `
+      <div style="min-width: 250px; display:grid; gap:0.45rem;">
+        <strong>Anotación #${annotationId}</strong>
+        <span><strong>Descripción:</strong> ${description}</span>
+        <span><strong>Categorías:</strong> ${categoriesHtml}</span>
+        <span><strong>Fecha:</strong> ${registrationDate}</span>
+        <span><strong>Votación:</strong> ${votesHtml}</span>
+        <span><strong>Ubicación:</strong> ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}</span>
+        <span><strong>Evidencias:</strong></span>
+        ${evidencesHtml}
+      </div>
+    `;
   }
 
   private focusOnNeighborhood(neighborhoodId: number | null): void {
