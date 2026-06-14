@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
-import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, inject, OnDestroy, ViewChild } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, inject, OnDestroy, ViewChild } from '@angular/core';
 import { FormControl, FormGroup, FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import * as L from 'leaflet';
 import { combineLatest, forkJoin, Observable, of, Subject, takeUntil } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
@@ -59,6 +60,12 @@ interface AnnotationPopupData {
   votesCount: number;
 }
 
+interface SelectedAnnotationLocation {
+  lat: number;
+  lng: number;
+  neighborhoodId: number;
+}
+
 const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
   {
     id: 1,
@@ -106,7 +113,7 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
 
         <div class="panel-section">
           <label for="neighborhood-select">Barrio</label>
-          <select id="neighborhood-select" (change)="onNeighborhoodSelected($event)">
+          <select id="neighborhood-select" [value]="selectedNeighborhoodId ?? ''" (change)="onNeighborhoodSelected($event)">
             <option value="">Todos los barrios</option>
             <option *ngFor="let neighborhood of neighborhoods" [value]="neighborhood.id_neighborhood">
               {{ neighborhood.name }}
@@ -173,19 +180,23 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
         </div>
 
         <div class="panel-section">
-          <h3>Registrar anotación</h3>
-          <p *ngIf="!isAnnotationMode">Active el modo y haga clic en el mapa para registrar una anotación georreferenciada.</p>
-          <p *ngIf="isAnnotationMode" class="annotation-mode-hint">Haga clic en el mapa para colocar la anotación.</p>
+          <h3>Anotaciones</h3>
+          <p *ngIf="!isAnnotationMode && !selectedAnnotationLocation">
+            Active el modo para crear una anotación desde el mapa.
+          </p>
+          <p *ngIf="isAnnotationMode" class="annotation-mode-hint">
+            Seleccione un barrio demarcado en el mapa para crear una anotación.
+          </p>
           <button
             type="button"
             class="app-button"
             [class.app-button--primary]="!isAnnotationMode"
             [class.app-button--danger]="isAnnotationMode"
-            [disabled]="isEditingPolygon"
             (click)="toggleAnnotationMode()"
           >
-            {{ isAnnotationMode ? 'Cancelar modo anotación' : 'Registrar anotación' }}
+            {{ isAnnotationMode ? 'Cancelar modo anotación' : 'Crear anotación' }}
           </button>
+
         </div>
 
         <div class="panel-section">
@@ -258,104 +269,6 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
       </div>
     </ng-template>
 
-    <!-- CU-12: Modal de nueva anotación georreferenciada -->
-    <div class="ann-overlay" *ngIf="annotationModalOpen" (click)="closeAnnotationModal()">
-      <div class="ann-modal" (click)="$event.stopPropagation()">
-        <div class="ann-modal-header">
-          <div>
-            <h3>Nueva anotación</h3>
-            <span class="ann-coords">📍 {{ pendingLatLng?.lat | number:'1.6-6' }}, {{ pendingLatLng?.lng | number:'1.6-6' }}</span>
-          </div>
-          <button type="button" class="ann-close" (click)="closeAnnotationModal()" title="Cerrar">✕</button>
-        </div>
-
-        <!-- Flujo alternativo 4a: punto fuera de barrio -->
-        <div class="ann-neighborhood-badge ann-neighborhood-badge--ok" *ngIf="pendingNeighborhoodId !== null">
-          ✓ Barrio detectado: <strong>{{ getNeighborhoodName(pendingNeighborhoodId) }}</strong>
-        </div>
-        <div class="ann-neighborhood-badge ann-neighborhood-badge--warn" *ngIf="pendingNeighborhoodId === null">
-          ⚠ El punto seleccionado no pertenece a ningún barrio demarcado. Al guardar, la anotación quedará sin barrio asignado.
-        </div>
-
-        <form [formGroup]="annotationForm" (ngSubmit)="submitAnnotation()" class="ann-form">
-          <div class="ann-form-grid">
-            <label>
-              Ciudadano *
-              <select formControlName="id_citizen">
-                <option value="">Seleccione ciudadano</option>
-                <option *ngFor="let c of annotationCitizens" [value]="c.id_citizen">{{ c.name }}</option>
-              </select>
-            </label>
-
-            <label>
-              Latitud
-              <input type="number" [value]="pendingLatLng?.lat | number:'1.6-6'" readonly class="readonly-input" />
-            </label>
-
-            <label>
-              Longitud
-              <input type="number" [value]="pendingLatLng?.lng | number:'1.6-6'" readonly class="readonly-input" />
-            </label>
-          </div>
-
-          <label class="ann-full-width">
-            Descripción *
-            <textarea formControlName="description" rows="3" placeholder="Describe el hallazgo o situación observada..."></textarea>
-          </label>
-
-          <div class="ann-extras-grid">
-            <div class="ann-field-group" *ngIf="annotationCategories.length > 0">
-              <h4>Categorías</h4>
-              <div class="ann-checkbox-grid">
-                <label *ngFor="let cat of annotationCategories">
-                  <input
-                    type="checkbox"
-                    [checked]="annotationForm.value.categoryIds?.includes(cat.id_category)"
-                    (change)="toggleAnnotationCategory(cat.id_category, $any($event.target).checked)"
-                  />
-                  {{ cat.name }}
-                </label>
-              </div>
-            </div>
-
-            <div class="ann-field-group" *ngIf="annotationEntities.length > 0">
-              <h4>Entidades interesadas</h4>
-              <div class="ann-checkbox-grid">
-                <label *ngFor="let entity of annotationEntities">
-                  <input
-                    type="checkbox"
-                    [checked]="annotationForm.value.interestedEntityIds?.includes(entity.id_entity)"
-                    (change)="toggleAnnotationEntity(entity.id_entity, $any($event.target).checked)"
-                  />
-                  {{ entity.name }}
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div class="ann-field-group">
-            <h4>Fotografías / Evidencias</h4>
-            <app-file-upload
-              [multiple]="true"
-              accept="image/png,image/jpeg,image/jpg,image/webp"
-              label="Adjunte fotografías de la anotación"
-              hint="Arrastre o seleccione imágenes (máx. 2 MB c/u)"
-              (filesSelected)="onAnnotationFilesSelected($event)"
-              (invalidFiles)="onAnnotationInvalidFiles($event)"
-            ></app-file-upload>
-          </div>
-
-          <div class="ann-actions">
-            <button type="button" class="app-button app-button--secondary" (click)="closeAnnotationModal()" [disabled]="isSavingAnnotation">
-              Cancelar
-            </button>
-            <button type="submit" class="app-button app-button--primary" [disabled]="isSavingAnnotation">
-              {{ isSavingAnnotation ? 'Guardando...' : (pendingNeighborhoodId === null ? 'Guardar sin barrio' : 'Guardar anotación') }}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
   `,
   styles: [
     `.map-page { display: grid; grid-template-columns: 320px 1fr; gap: 1rem; margin: 0; padding: 0; }`,
@@ -416,18 +329,8 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     `.annotation-mode-hint { color: var(--color-primary); font-weight: 500; }`,
     `@media (max-width: 980px) { .map-page { grid-template-columns: 1fr; } }`,
 
-    /* Modal overlay */
-    `.ann-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 1rem; }`,
-    `.ann-modal { background: white; border-radius: 1.25rem; box-shadow: 0 20px 60px rgba(0,0,0,0.25); width: 100%; max-width: 640px; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; }`,
-    `.ann-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.5rem 1.5rem 0; }`,
-    `.ann-modal-header h3 { margin: 0 0 0.25rem; font-size: 1.15rem; }`,
-    `.ann-coords { font-size: 0.85rem; color: var(--color-ink-muted, #6b7280); font-family: monospace; }`,
-    `.ann-close { background: none; border: none; font-size: 1.1rem; cursor: pointer; color: var(--color-ink-muted, #6b7280); padding: 0.25rem 0.5rem; border-radius: 0.5rem; line-height: 1; flex-shrink: 0; }`,
-    `.ann-close:hover { background: var(--color-surface, #f3f4f6); }`,
-    `.ann-neighborhood-badge { margin: 0.75rem 1.5rem 0; padding: 0.75rem 1rem; border-radius: 0.75rem; font-size: 0.9rem; }`,
-    `.ann-neighborhood-badge--ok { background: rgba(16,185,129,0.1); color: #065f46; }`,
-    `.ann-neighborhood-badge--warn { background: rgba(245,158,11,0.1); color: #92400e; }`,
     `.ann-form { display: grid; gap: 1rem; padding: 1.25rem 1.5rem 1.5rem; }`,
+    `.ann-form--sidebar { padding: 0; margin-top: 0.25rem; }`,
     `.ann-form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }`,
     `.ann-full-width { display: grid; gap: 0.5rem; }`,
     `.ann-extras-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }`,
@@ -464,6 +367,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private readonly apiClient = inject(ApiClient);
   private readonly trackingService = inject(TrackingService);
   private readonly toastService = inject(ToastService);
+  private readonly router = inject(Router);
 
   private readonly destroy$ = new Subject<void>();
 
@@ -497,15 +401,13 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private polygonPoints: L.LatLng[] = [];
   private polygonMarkers: L.Marker[] = [];
   private polygonLine: L.Polyline | null = null;
-  private selectedNeighborhoodId: number | null = null;
+  selectedNeighborhoodId: number | null = null;
   private existingPolygonPoints: Point[] = [];
 
   // ── CU-12 state ───────────────────────────────────────────────────────────
   isAnnotationMode = false;
-  annotationModalOpen = false;
   isSavingAnnotation = false;
-  pendingLatLng: L.LatLng | null = null;
-  pendingNeighborhoodId: number | null = null;
+  selectedAnnotationLocation: SelectedAnnotationLocation | null = null;
 
   annotationCategories: Category[] = [];
   annotationEntities: Entity[] = [];
@@ -542,6 +444,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private categoryDescendantsMap = new Map<number, Set<number>>();
   private categoryColorMap = new Map<number, { background: string; shadow: string }>();
   private annotationCategoryMap = new Map<number, Set<number>>();
+  private annotationDescriptionMap = new Map<number, string>();
 
   annotationForm = new FormGroup({
     id_citizen: new FormControl<number | null>(null),
@@ -909,32 +812,54 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   // ── CU-12: Annotation mode ─────────────────────────────────────────────────
 
   toggleAnnotationMode(): void {
-    if (this.isEditingPolygon) return;
+    if (this.isEditingPolygon) {
+      // Si el usuario está editando/demarcando, salir de ese modo para no bloquear la anotación.
+      this.cancelPolygonEditing();
+      this.toastService.info('Modo demarcación desactivado', 'Ahora puede registrar una anotación en el mapa.');
+    }
     this.isAnnotationMode = !this.isAnnotationMode;
     if (this.isAnnotationMode) {
+      // Evita handlers duplicados en cambios repetidos de modo.
+      this.map.off('click', this.onAnnotationMapClick);
       this.map.on('click', this.onAnnotationMapClick);
     } else {
       this.map.off('click', this.onAnnotationMapClick);
-      this.closeAnnotationModal();
     }
   }
 
   private onAnnotationMapClick = (e: L.LeafletMouseEvent): void => {
-    if (!this.isAnnotationMode || this.annotationModalOpen) return;
-    this.openAnnotationModal(e.latlng);
+    if (!this.isAnnotationMode) return;
+    this.openAnnotationFromMap(e.latlng);
   };
 
-  openAnnotationModal(latlng: L.LatLng): void {
-    this.pendingLatLng = latlng;
-    this.pendingNeighborhoodId = this.findNeighborhoodForPoint(latlng.lat, latlng.lng);
-    this.resetAnnotationForm();
-    this.annotationModalOpen = true;
+  openAnnotationFromMap(latlng: L.LatLng): void {
+    const pendingNeighborhoodId = this.findNeighborhoodForPoint(latlng.lat, latlng.lng);
+    if (pendingNeighborhoodId === null) {
+      this.toastService.warning(
+        'Punto fuera de demarcación',
+        'Debe seleccionar un punto dentro de un barrio demarcado.'
+      );
+      return;
+    }
+
+    this.isAnnotationMode = false;
+    this.map.off('click', this.onAnnotationMapClick);
+    const neighborhoodName = this.getNeighborhoodName(pendingNeighborhoodId);
+    this.router.navigate(['/anotaciones'], {
+      queryParams: {
+        fromMap: '1',
+        neighborhoodId: pendingNeighborhoodId,
+        neighborhoodName,
+        latitude: latlng.lat,
+        longitude: latlng.lng
+      }
+    });
   }
 
-  closeAnnotationModal(): void {
-    this.annotationModalOpen = false;
-    this.pendingLatLng = null;
-    this.pendingNeighborhoodId = null;
+  clearAnnotationSelection(): void {
+    this.isAnnotationMode = false;
+    this.map.off('click', this.onAnnotationMapClick);
+    this.selectedAnnotationLocation = null;
     this.resetAnnotationForm();
   }
 
@@ -986,10 +911,16 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       return;
     }
 
-    if (!this.pendingLatLng) return;
+    if (!this.selectedAnnotationLocation) {
+      this.toastService.warning(
+        'Ubicación requerida',
+        'Seleccione un barrio demarcado en el mapa para crear una anotación.'
+      );
+      return;
+    }
 
-    const lat = this.pendingLatLng.lat;
-    const lng = this.pendingLatLng.lng;
+    const lat = this.selectedAnnotationLocation.lat;
+    const lng = this.selectedAnnotationLocation.lng;
 
     if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
       this.toastService.danger('Coordenadas inválidas', 'Las coordenadas del punto no son válidas.');
@@ -999,7 +930,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     this.isSavingAnnotation = true;
 
     const payload: AnnotationPayload = {
-      id_neighborhood: this.pendingNeighborhoodId ?? undefined,
+      id_neighborhood: this.selectedAnnotationLocation.neighborhoodId,
       id_citizen: Number(idCitizen),
       description,
       latitude: lat,
@@ -1008,8 +939,12 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     };
 
     this.annotationService.create(payload).pipe(
-      catchError(() => {
-        this.toastService.danger('Error al crear', 'No se pudo registrar la anotación. Intente nuevamente.');
+      catchError((error) => {
+        const backendMessage = this.extractErrorMessage(error);
+        this.toastService.danger(
+          'Error al crear',
+          backendMessage ? `No se pudo registrar la anotación: ${backendMessage}` : 'No se pudo registrar la anotación. Intente nuevamente.'
+        );
         this.isSavingAnnotation = false;
         return of(null);
       })
@@ -1020,6 +955,15 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       const entityIds = this.annotationForm.value.interestedEntityIds ?? [];
 
       const tasks: Observable<unknown>[] = [];
+      let optionalTaskFailures = 0;
+      const wrapOptionalTask = (task$: Observable<unknown>): Observable<unknown> =>
+        task$.pipe(
+          catchError((error) => {
+            optionalTaskFailures += 1;
+            console.error('[CU-12] Error en tarea opcional de anotación:', error);
+            return of(null);
+          })
+        );
 
       // Point for map display (always first — used to update annotationLayer).
       // id_neighborhood is intentionally omitted: the backend rejects payloads that
@@ -1040,16 +984,16 @@ export class MapComponent implements AfterViewInit, OnDestroy {
           id_annotation: annotation.id_annotation,
           id_category: categoryId
         };
-        tasks.push(this.annotationCategoryService.create(catPayload));
+        tasks.push(wrapOptionalTask(this.annotationCategoryService.create(catPayload)));
       }
 
       // Interested parties
       for (const entityId of entityIds) {
         tasks.push(
-          this.interestedPartyService.create({
+          wrapOptionalTask(this.interestedPartyService.create({
             id_annotation: annotation.id_annotation,
             id_entity: entityId
-          })
+          }))
         );
       }
 
@@ -1058,24 +1002,34 @@ export class MapComponent implements AfterViewInit, OnDestroy {
         const fd = new FormData();
         fd.append('id_annotation', String(annotation.id_annotation));
         fd.append('file', file);
-        tasks.push(this.evidenceService.createForm(fd));
+        tasks.push(wrapOptionalTask(this.evidenceService.createForm(fd)));
       }
 
       forkJoin(tasks).pipe(
-        catchError(() => {
-          this.toastService.warning(
-            'Anotación creada',
-            'La anotación se registró, pero algunos datos auxiliares no se guardaron completamente.'
+        catchError((error) => {
+          const backendMessage = this.extractErrorMessage(error);
+          this.toastService.danger(
+            'Error al crear punto de mapa',
+            backendMessage
+              ? `La anotación se registró, pero no se pudo crear su punto en el mapa: ${backendMessage}`
+              : 'La anotación se registró, pero no se pudo crear su punto en el mapa.'
           );
           this.isSavingAnnotation = false;
-          this.closeAnnotationModal();
+          this.clearAnnotationSelection();
           return of(null);
         })
       ).subscribe((results) => {
         this.isSavingAnnotation = false;
 
         if (results) {
-          this.toastService.success('Anotación registrada', 'La anotación fue guardada y ya aparece en el mapa.');
+          if (optionalTaskFailures > 0) {
+            this.toastService.warning(
+              'Anotación registrada parcialmente',
+              'La anotación fue guardada y aparece en el mapa, pero algunas asociaciones opcionales no se registraron.'
+            );
+          } else {
+            this.toastService.success('Anotación registrada', 'La anotación fue guardada y ya aparece en el mapa.');
+          }
 
           // Add the new Point (index 0) to this.points and refresh the map immediately
           const newPoint = results[0] as Point;
@@ -1094,11 +1048,12 @@ export class MapComponent implements AfterViewInit, OnDestroy {
             this.buildCategoryCounts();
 
             this.points = [...this.points, newPoint];
+            this.annotationDescriptionMap.set(newAnnotationId, description);
             this.refreshMapLayers();
           }
         }
 
-        this.closeAnnotationModal();
+        this.clearAnnotationSelection();
       });
     });
   }
@@ -1130,8 +1085,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     }
 
     for (const [neighborhoodId, pts] of neighborhoodPolygonsMap) {
-      const sorted = pts.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-      const coords: L.LatLngTuple[] = sorted.map(p => [p.latitude, p.longitude]);
+      const coords = this.buildNeighborhoodPolygonCoordinates(pts);
       if (coords.length >= 3 && this.isPointInPolygon(lat, lng, coords)) {
         return neighborhoodId;
       }
@@ -1402,12 +1356,18 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       this.pointService.listCollection().pipe(
         catchError(() => of({ items: [] as Point[], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
       ),
+      this.annotationService.listCollection().pipe(
+        catchError(() => of({ items: [] as Annotation[], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+      ),
       this.loadCategoryFilterData()
     ])
       .pipe(takeUntil(this.destroy$))
-      .subscribe(([neighborhoodCollection, pointCollection, categoryFilterData]) => {
+      .subscribe(([neighborhoodCollection, pointCollection, annotationCollection, categoryFilterData]) => {
         this.neighborhoods = neighborhoodCollection.items;
         this.points = pointCollection.items;
+        this.annotationDescriptionMap = new Map(
+          annotationCollection.items.map((annotation) => [annotation.id_annotation, annotation.description ?? ''])
+        );
         this.initializeCategoryFilterState(categoryFilterData.categories, categoryFilterData.annotationCategories);
         this.refreshMapLayers();
       });
@@ -1462,8 +1422,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     });
 
     neighborhoodPointsMap.forEach((pts, neighborhoodId) => {
-      const sortedPoints = pts.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-      const coordinates = sortedPoints.map(p => [p.latitude, p.longitude] as L.LatLngTuple);
+      const coordinates = this.buildNeighborhoodPolygonCoordinates(pts);
 
       if (coordinates.length >= 3) {
         const neighborhood = this.neighborhoods.find(n => n.id_neighborhood === neighborhoodId);
@@ -1513,6 +1472,8 @@ export class MapComponent implements AfterViewInit, OnDestroy {
           }
         });
         marker.bindPopup(`Cargando anotación #${point.id_annotation ?? point.id_point}...`);
+        const annotationDescription = point.id_annotation != null ? this.annotationDescriptionMap.get(point.id_annotation) : '';
+        marker.bindTooltip((annotationDescription ?? '').trim() || 'Anotación sin descripción', { direction: 'top' });
         this.annotationLayer.addLayer(marker);
       } else {
         // Other point types → general pointLayer (draggable)
@@ -1601,17 +1562,21 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   }
 
   private focusOnNeighborhood(neighborhoodId: number | null): void {
+    // Sincroniza selección lógica con el barrio enfocado (incluye click sobre polígonos).
+    this.selectedNeighborhoodId = neighborhoodId;
+
     if (neighborhoodId == null) {
       this.map.setView([5.074, -75.515], 14);
+      this.selectedNeighborhoodLayer.clearLayers();
       return;
     }
 
     const polygonPoints = this.points
       .filter(p => p.point_type === 'polygon' && p.id_neighborhood === neighborhoodId)
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      .slice();
 
-    if (polygonPoints.length >= 3) {
-      const coordinates = polygonPoints.map(p => [p.latitude, p.longitude] as L.LatLngTuple);
+    const coordinates = this.buildNeighborhoodPolygonCoordinates(polygonPoints);
+    if (coordinates.length >= 3) {
       this.map.fitBounds(coordinates as L.LatLngBoundsExpression);
       this.selectedNeighborhoodLayer.clearLayers();
 
@@ -1639,6 +1604,65 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     });
 
     this.selectedNeighborhoodLayer.addLayer(highlight);
+  }
+
+  private buildNeighborhoodPolygonCoordinates(points: Point[]): L.LatLngTuple[] {
+    const valid = points.filter(
+      (point) =>
+        point.latitude != null &&
+        point.longitude != null &&
+        Number.isFinite(point.latitude) &&
+        Number.isFinite(point.longitude)
+    );
+
+    if (valid.length < 3) {
+      return valid.map((point) => [point.latitude, point.longitude] as L.LatLngTuple);
+    }
+
+    const hasCompleteOrder = valid.every((point) => point.order != null);
+    const uniqueOrderCount = new Set(valid.map((point) => point.order)).size;
+
+    if (hasCompleteOrder && uniqueOrderCount === valid.length) {
+      return valid
+        .slice()
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        .map((point) => [point.latitude, point.longitude] as L.LatLngTuple);
+    }
+
+    const centroid = valid.reduce(
+      (acc, point) => ({ lat: acc.lat + point.latitude, lng: acc.lng + point.longitude }),
+      { lat: 0, lng: 0 }
+    );
+    const centerLat = centroid.lat / valid.length;
+    const centerLng = centroid.lng / valid.length;
+
+    return valid
+      .slice()
+      .sort((a, b) => {
+        const angleA = Math.atan2(a.latitude - centerLat, a.longitude - centerLng);
+        const angleB = Math.atan2(b.latitude - centerLat, b.longitude - centerLng);
+        return angleA - angleB;
+      })
+      .map((point) => [point.latitude, point.longitude] as L.LatLngTuple);
+  }
+
+  private extractErrorMessage(error: unknown): string {
+    if (!error || typeof error !== 'object') {
+      return '';
+    }
+
+    const err = error as Record<string, any>;
+    if (typeof err['message'] === 'string' && err['message'] && err['message'] !== 'Unknown Error') {
+      return err['message'];
+    }
+
+    const body = err['error'];
+    if (body && typeof body === 'object') {
+      const message = (body as Record<string, unknown>)['message'] ?? (body as Record<string, unknown>)['error'];
+      return typeof message === 'string' ? message : '';
+    }
+
+    return typeof body === 'string' ? body : '';
   }
 
   private updatePointLocation(point: Point, latLng: L.LatLng): void {

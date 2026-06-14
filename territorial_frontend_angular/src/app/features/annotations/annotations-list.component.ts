@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectionStrategy, Component, inject, ChangeDetectorRef } from '@angular/core';
 import { FormControl, FormGroup, FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 
@@ -28,6 +29,7 @@ import {
   EvidenceCrudService,
   InterestedPartyCrudService,
   NeighborhoodCrudService,
+  PointCrudService,
   VoteCrudService
 } from '../../core/api/territorial-crud.services';
 import { DataTableAction, DataTableColumn } from '../../shared/components/data-table/data-table.component';
@@ -62,7 +64,7 @@ import { normalizeStatus } from '../../core/utils/status.utils';
 
             <label>
               Barrio
-              <select formControlName="id_neighborhood">
+              <select formControlName="id_neighborhood" [disabled]="isLocationPrefilledFromMap">
                 <option value="">Sin barrio</option>
                 <option *ngFor="let neighborhood of neighborhoods" [value]="neighborhood.id_neighborhood">
                   {{ neighborhood.name }}
@@ -80,14 +82,17 @@ import { normalizeStatus } from '../../core/utils/status.utils';
 
             <label>
               Latitud
-              <input type="number" step="0.000001" formControlName="latitude" />
+              <input type="number" step="0.000001" formControlName="latitude" [readonly]="isLocationPrefilledFromMap" />
             </label>
 
             <label>
               Longitud
-              <input type="number" step="0.000001" formControlName="longitude" />
+              <input type="number" step="0.000001" formControlName="longitude" [readonly]="isLocationPrefilledFromMap" />
             </label>
           </div>
+          <p *ngIf="isLocationPrefilledFromMap" class="prefill-hint">
+            Ubicación tomada desde el mapa: {{ prefilledNeighborhoodName || 'Barrio seleccionado' }} ({{ annotationForm.controls.latitude.value }}, {{ annotationForm.controls.longitude.value }}).
+          </p>
 
           <label class="full-width">
             Descripción
@@ -249,6 +254,7 @@ import { normalizeStatus } from '../../core/utils/status.utils';
     ".annotations-panel, .annotations-list, .annotations-detail { padding: 1.25rem; }",
     ".annotations-header h2 { margin: 0 0 0.35rem; }",
     ".annotation-form { display: grid; gap: 1rem; }",
+    ".prefill-hint { margin: -0.25rem 0 0; color: var(--color-ink-muted, #6b7280); font-size: 0.88rem; }",
     ".form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }",
     ".full-width { width: 100%; display: grid; gap: 0.5rem; }",
     "label { display: grid; gap: 0.5rem; font-size: 0.95rem; }",
@@ -280,10 +286,12 @@ export class AnnotationsListComponent {
   private readonly evidenceService = inject(EvidenceCrudService);
   private readonly interestedPartyService = inject(InterestedPartyCrudService);
   private readonly annotationCategoryService = inject(AnnotationCategoryCrudService);
+  private readonly pointService = inject(PointCrudService);
   private readonly voteService = inject(VoteCrudService);
   private readonly toastService = inject(ToastService);
   private readonly authService = inject(AuthService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly route = inject(ActivatedRoute);
 
   annotations: Annotation[] = [];
   filteredAnnotations: Annotation[] = [];
@@ -294,6 +302,8 @@ export class AnnotationsListComponent {
   selectedAnnotation: AnnotationDetail | null = null;
   photoFiles: File[] = [];
   currentUserVote: Vote | null = null;
+  isLocationPrefilledFromMap = false;
+  prefilledNeighborhoodName: string | null = null;
 
   filters = {
     search: '',
@@ -330,6 +340,7 @@ export class AnnotationsListComponent {
 
   constructor() {
     this.loadData();
+    this.applyMapPrefillFromQueryParams();
   }
 
   handleAction(event: { actionId: string; row: Annotation }): void {
@@ -436,6 +447,26 @@ export class AnnotationsListComponent {
         return;
       }
 
+      this.pointService.create({
+        id_annotation: annotation.id_annotation,
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+        point_type: 'annotation'
+      }).pipe(
+        catchError(() => {
+          this.toastService.warning(
+            'Anotación creada parcialmente',
+            'La anotación fue creada, pero no se pudo crear el indicador naranja en el mapa.'
+          );
+          this.resetForm();
+          this.loadData();
+          return of(null);
+        })
+      ).subscribe((point) => {
+        if (!point) {
+          return;
+        }
+
       const tasks = [] as Array<import('rxjs').Observable<unknown>>;
       const categoryIds = this.annotationForm.value.categoryIds ?? [];
       const entityIds = this.annotationForm.value.interestedEntityIds ?? [];
@@ -460,21 +491,22 @@ export class AnnotationsListComponent {
       }
 
       if (tasks.length === 0) {
-        this.toastService.success('Anotación creada', 'La anotación se agregó correctamente.');
+        this.toastService.success('Anotación creada', 'La anotación se agregó correctamente y ya aparece en el mapa.');
         this.resetForm();
         return this.loadData();
       }
 
       forkJoin(tasks)
         .pipe(catchError(() => {
-          this.toastService.warning('Anotación creada', 'La anotación se creó, pero algunos datos auxiliares no se guardaron completamente.');
+          this.toastService.warning('Anotación creada', 'La anotación y su punto en mapa se crearon, pero algunos datos auxiliares no se guardaron completamente.');
           return of(null);
         }))
         .subscribe(() => {
-          this.toastService.success('Anotación creada', 'La anotación y sus datos relacionados se guardaron correctamente.');
+          this.toastService.success('Anotación creada', 'La anotación y su indicador en el mapa se guardaron correctamente.');
           this.resetForm();
           this.loadData();
         });
+      });
     });
   }
 
@@ -619,6 +651,42 @@ export class AnnotationsListComponent {
       interestedEntityIds: []
     });
     this.photoFiles = [];
+    this.isLocationPrefilledFromMap = false;
+    this.prefilledNeighborhoodName = null;
+    this.annotationForm.controls.id_neighborhood.enable({ emitEvent: false });
+  }
+
+  private applyMapPrefillFromQueryParams(): void {
+    this.route.queryParamMap.subscribe((params) => {
+      const fromMap = params.get('fromMap') === '1';
+      if (!fromMap) {
+        return;
+      }
+
+      const neighborhoodIdParam = params.get('neighborhoodId');
+      const latitudeParam = params.get('latitude');
+      const longitudeParam = params.get('longitude');
+      const neighborhoodNameParam = params.get('neighborhoodName');
+
+      const neighborhoodId = neighborhoodIdParam ? Number(neighborhoodIdParam) : null;
+      const latitude = latitudeParam ? Number(latitudeParam) : null;
+      const longitude = longitudeParam ? Number(longitudeParam) : null;
+
+      if (neighborhoodId == null || latitude == null || longitude == null) {
+        return;
+      }
+
+      this.isLocationPrefilledFromMap = true;
+      this.prefilledNeighborhoodName = neighborhoodNameParam;
+      this.annotationForm.patchValue({
+        id_neighborhood: neighborhoodId,
+        latitude,
+        longitude
+      });
+      this.annotationForm.controls.id_neighborhood.disable({ emitEvent: false });
+      this.toastService.info('Anotaciones', 'Ubicación del mapa precargada en el formulario.');
+      this.cdr.markForCheck();
+    });
   }
 
   private checkUserVote(annotationId: number): void {
