@@ -18,6 +18,8 @@ export interface EntityTableColumn {
   header: string;
   width?: string;
   emptyValue?: string;
+  type?: 'text' | 'badge' | 'image';
+  imageAltKey?: string;
 }
  
 export interface DependencyCheck {
@@ -41,6 +43,7 @@ export interface EntityConfig {
   idField: string;
   hasFile: boolean;
   fileField?: string;
+  filePreviewField?: string;
   searchEndpoint?: string;
   dependencyCheck?: DependencyCheck;
   dependencyChecks?: DependencyCheck[];
@@ -95,6 +98,7 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
     idField: 'id_entity',
     hasFile: true,
     fileField: 'file',
+    filePreviewField: 'logo_url',
     searchEndpoint: 'entities/search',
     dependencyChecks: [
       {
@@ -111,6 +115,7 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
       }
     ],
     columns: [
+      { key: 'logo_url', header: 'Logo', type: 'image', imageAltKey: 'name', width: '96px', emptyValue: 'Sin logo' },
       { key: 'name', header: 'Nombre' },
       { key: 'nit', header: 'NIT' },
       { key: 'email', header: 'Correo' },

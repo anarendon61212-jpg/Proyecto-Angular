@@ -345,8 +345,9 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
 
     if (this.item && this.config.hasFile && this.config.fileField) {
       const fileField = this.config.fields.find((f) => f.key === this.config.fileField);
-      if (fileField && this.item[`${this.config.fileField}_url`]) {
-        this.previewUrls.set(this.config.fileField, this.item[`${this.config.fileField}_url`]);
+      const previewField = this.config.filePreviewField || `${this.config.fileField}_url`;
+      if (fileField && this.item[previewField]) {
+        this.previewUrls.set(this.config.fileField, this.item[previewField]);
       }
     }
 

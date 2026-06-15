@@ -4,7 +4,7 @@ import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output, Templa
 import { StatusBadgeComponent, StatusBadgeVariant } from '../status-badge/status-badge.component';
 
 export type TableAlignment = 'left' | 'center' | 'right';
-export type TableColumnType = 'text' | 'badge';
+export type TableColumnType = 'text' | 'badge' | 'image';
 export type TableActionTone = 'default' | 'danger' | 'muted';
 
 export interface DataTableColumn<TItem = unknown> {
@@ -14,6 +14,7 @@ export interface DataTableColumn<TItem = unknown> {
   align?: TableAlignment;
   type?: TableColumnType;
   emptyValue?: string;
+  imageAltKey?: string;
   formatter?: (row: TItem) => string | number | null | undefined;
   badgeVariant?: (row: TItem) => StatusBadgeVariant;
 }
@@ -56,6 +57,25 @@ export class DataTableComponent<TItem extends object = Record<string, unknown>> 
     return rawValue === null || rawValue === undefined || rawValue === ''
       ? column.emptyValue ?? '—'
       : String(rawValue);
+  }
+
+  imageValue(row: TItem, column: DataTableColumn<TItem>): string {
+    const value = this.columnValue(row, column);
+
+    if (value === (column.emptyValue ?? 'â€”')) {
+      return '';
+    }
+
+    if (/^(https?:|data:|blob:|\/)/i.test(value)) {
+      return value;
+    }
+
+    return `/${value}`;
+  }
+
+  imageAlt(row: TItem, column: DataTableColumn<TItem>): string {
+    const altValue = this.valueFromPath(row, column.imageAltKey);
+    return altValue ? `Logo de ${String(altValue)}` : column.header;
   }
 
   visibleActions(row: TItem): DataTableAction<TItem>[] {

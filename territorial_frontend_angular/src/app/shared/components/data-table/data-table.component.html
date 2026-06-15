@@ -41,6 +41,14 @@
                       [value]="columnValue(row, column)"
                       [variant]="column.badgeVariant ? column.badgeVariant(row) : undefined"
                     />
+                  } @else if (column.type === 'image') {
+                    @if (imageValue(row, column)) {
+                      <a class="data-table__image-link" [href]="imageValue(row, column)" target="_blank" rel="noopener">
+                        <img class="data-table__image" [src]="imageValue(row, column)" [alt]="imageAlt(row, column)" />
+                      </a>
+                    } @else {
+                      {{ column.emptyValue || 'Sin imagen' }}
+                    }
                   } @else {
                     {{ columnValue(row, column) }}
                   }
