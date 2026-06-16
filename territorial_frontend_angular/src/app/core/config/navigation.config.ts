@@ -35,13 +35,6 @@ export const MAIN_NAVIGATION: NavigationItem[] = [
     roles: ['Administrador', 'Funcionario']
   },
   {
-    label: 'Estadísticas',
-    icon: '📊',
-    route: '/estadisticas',
-    section: 'Principal',
-    roles: ['Administrador', 'Funcionario']
-  },
-  {
     label: 'Comunas',
     icon: '⌂',
     route: '/territorios/comunas',

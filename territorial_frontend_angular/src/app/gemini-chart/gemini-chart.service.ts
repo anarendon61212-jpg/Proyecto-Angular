@@ -29,7 +29,10 @@ export class GeminiChartService {
 
   getChartData(query: string): Observable<GeminiChartData> {
     return this.apiClient.create<ReportResponse>('reports', { query }).pipe(
-      catchError(() => of(this.getFallbackChartData()))
+      catchError((error) => {
+        console.error('Error al obtener datos del gráfico:', error);
+        throw error;
+      })
     );
   }
 
