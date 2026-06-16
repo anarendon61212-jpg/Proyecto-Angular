@@ -77,6 +77,7 @@ export class OfficialLocationService implements OnDestroy {
           }
 
           this.activeOfficialId = match.id_official;
+          this.normalizeSessionOfficialGpsState(match);
           this.startGeolocationWatch();
         },
         error: () => {
@@ -111,7 +112,8 @@ export class OfficialLocationService implements OnDestroy {
             email,
             role: 'Funcionario',
             status: 'active',
-            gps_active: true
+            // New session-based officials start offline until first real GPS fix.
+            gps_active: false
           };
 
           this.officialService.create(payload as OfficialPayload)
@@ -361,6 +363,10 @@ export class OfficialLocationService implements OnDestroy {
   }
 
   private stopTracking(): void {
+    // When the session closes, explicitly report GPS offline once
+    // so the backend does not keep the official as active.
+    this.reportGpsInactive();
+
     if (this.watchId != null && navigator?.geolocation) {
       navigator.geolocation.clearWatch(this.watchId);
     }
@@ -407,8 +413,33 @@ export class OfficialLocationService implements OnDestroy {
     return distanceMeters >= this.minMoveDistanceMeters;
   }
 
+  private normalizeSessionOfficialGpsState(official: Official): void {
+    // For OAuth/session-based tracking, stale or missing GPS signal must not
+    // remain shown as active until the next real position is received.
+    if (official.gps_active !== true) {
+      return;
+    }
+
+    if (this.isRecentGpsUpdate(official.last_gps_update)) {
+      return;
+    }
+
+    this.sendLocationUpdate({ gps_active: false });
+  }
+
   private findOfficialByEmail(officials: Official[], email: string): Official | undefined {
     return officials.find((official) => (official.email ?? '').trim().toLowerCase() === email);
+  }
+
+  private isRecentGpsUpdate(timestamp: string | null | undefined, maxAgeMs = 30_000): boolean {
+    if (!timestamp) {
+      return false;
+    }
+    const ts = new Date(timestamp).getTime();
+    if (!Number.isFinite(ts)) {
+      return false;
+    }
+    return (Date.now() - ts) <= maxAgeMs;
   }
 
   private calculateDistanceMeters(

@@ -2160,14 +2160,15 @@ export class MapComponent implements AfterViewInit, OnDestroy {
 
     if (existingMarker) {
       existingMarker.setLatLng(adjustedTrackingCoords);
-      existingMarker.setIcon(this.buildOfficialIcon(officialTracking.gps_active !== false));
+      const isGpsActive = this.isOfficialGpsActive(officialTracking);
+      existingMarker.setIcon(this.buildOfficialIcon(isGpsActive));
       existingMarker.bindPopup(this.buildOfficialPopupContent(officialTracking));
       this.updateNoOfficialsMessageState();
       return;
     }
 
     const marker = L.marker(adjustedTrackingCoords, {
-      icon: this.buildOfficialIcon(officialTracking.gps_active !== false),
+      icon: this.buildOfficialIcon(this.isOfficialGpsActive(officialTracking)),
       draggable: false
     });
     marker.bindPopup(this.buildOfficialPopupContent(officialTracking));
@@ -2216,7 +2217,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     const lastUpdate = officialTracking.last_gps_update
       ? new Date(officialTracking.last_gps_update).toLocaleString()
       : 'Sin dato';
-    const gpsStatus = officialTracking.gps_active === false ? 'Sin conexión' : 'Activo';
+    const gpsStatus = this.isOfficialGpsActive(officialTracking) ? 'Activo' : 'Sin conexión';
     return `<strong>${knownOfficial?.name ?? `Funcionario #${officialTracking.id_official}`}</strong><br>`
       + `Correo: ${knownOfficial?.email ?? 'Sin dato'}<br>`
       + `Teléfono: ${knownOfficial?.phone ?? 'Sin dato'}<br>`
@@ -2292,6 +2293,10 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     if (typeof status !== 'string') return false;
     const normalized = status.trim().toLowerCase();
     return normalized === 'active' || normalized === 'activo' || normalized === 'activa';
+  }
+
+  private isOfficialGpsActive(officialTracking: OfficialTracking): boolean {
+    return officialTracking.gps_active === true;
   }
 
   private updateNoOfficialsMessageState(): void {
