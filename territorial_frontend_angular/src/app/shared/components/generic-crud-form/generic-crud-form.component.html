@@ -6,7 +6,7 @@
   }
 
   @for (field of config.fields; track field.key) {
-    @if (field.type !== 'file') {
+    @if (field.type !== 'file' && !isFieldHidden(field)) {
       <div class="form-group">
         <label [for]="field.key">
           {{ field.label }}

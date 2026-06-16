@@ -3,7 +3,12 @@ import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnInit, Output
 import { take } from 'rxjs';
  
 import { CrudResourceService, ApiCollection } from '@core/api/crud-resource.service';
-import { DataTableColumn, DataTableComponent, DataTableActionEvent } from '@shared/components/data-table/data-table.component';
+import {
+  DataTableAction,
+  DataTableColumn,
+  DataTableComponent,
+  DataTableActionEvent
+} from '@shared/components/data-table/data-table.component';
 import { PaginatorComponent } from '@shared/components/paginator/paginator.component';
 import { DrawerPanelComponent } from '@shared/components/drawer-panel/drawer-panel.component';
 import { ConfirmDialogService } from '@shared/services/confirm-dialog.service';
@@ -47,7 +52,7 @@ interface DependencyCheckResult {
           [title]="'Listado de ' + config.labelPlural"
           [rows]="rowsForTable(collection.items)"
           [columns]="tableColumns"
-          [actions]="tableActions"
+          [actions]="allTableActions"
           (actionClick)="onTableAction($event)"
           [trackByKey]="config.idField"
         ></app-data-table>
@@ -73,6 +78,8 @@ interface DependencyCheckResult {
         [crudService]="crudService"
         [item]="editingItem()"
         [selectOptions]="formSelectOptions()"
+        [fixedValues]="fixedValues"
+        [hiddenFields]="hiddenFields"
         (saved)="onFormSaved($event)"
         (cancelled)="closeForm()"
         (valueChanges)="onFormValueChanged($event)"
@@ -134,12 +141,16 @@ export class GenericCrudListComponent implements OnInit {
   @Input() crudService!: CrudResourceService<any>;
   @Input() dependencyCheckService?: DependencyCheckService;
   @Input() dependencyCheckServices: Record<string, DependencyCheckService> = {};
+  @Input() extraTableActions: DataTableAction<any>[] = [];
+  @Input() fixedValues: Record<string, any> = {};
+  @Input() hiddenFields: string[] = [];
   @Input() set selectOptions(options: Record<string, any[]> | null | undefined) {
     this.formSelectOptions.set(options ?? {});
   }
 
   @Output() formValueChanged = new EventEmitter<Record<string, any>>();
   @Output() saved = new EventEmitter<any>();
+  @Output() tableAction = new EventEmitter<DataTableActionEvent<any>>();
  
   readonly collection = signal<ApiCollection<any> | null>(null);
   readonly isFormOpen = signal(false);
@@ -151,6 +162,10 @@ export class GenericCrudListComponent implements OnInit {
     { id: 'edit', label: 'Editar', icon: '✎' },
     { id: 'delete', label: 'Eliminar', icon: '🗑', tone: 'danger' as const }
   ];
+
+  get allTableActions(): DataTableAction<any>[] {
+    return [...this.extraTableActions, ...this.tableActions];
+  }
  
   ngOnInit(): void {
     this.tableColumns.length = 0;
@@ -185,6 +200,8 @@ export class GenericCrudListComponent implements OnInit {
       this.isFormOpen.set(true);
     } else if (actionId === 'delete') {
       this.onDelete(row);
+    } else {
+      this.tableAction.emit(event);
     }
   }
  

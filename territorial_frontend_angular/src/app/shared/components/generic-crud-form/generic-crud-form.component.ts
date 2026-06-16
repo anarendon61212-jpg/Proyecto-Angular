@@ -40,6 +40,8 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
   @Input() crudService!: CrudResourceService<any>;
   @Input() item: any = null;
   @Input() selectOptions: Record<string, any[]> = {};
+  @Input() fixedValues: Record<string, any> = {};
+  @Input() hiddenFields: string[] = [];
  
   @Output() saved = new EventEmitter<any>();
   @Output() cancelled = new EventEmitter<void>();
@@ -68,6 +70,10 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
     if (this.form && changes['selectOptions']) {
       this.normalizeSelectControls();
     }
+
+    if (this.form && (changes['fixedValues'] || changes['hiddenFields'])) {
+      this.syncFixedControls();
+    }
   }
  
   private initForm(): void {
@@ -81,6 +87,7 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
  
     this.form = this.fb.group(group);
     this.syncFormWithItem();
+    this.syncFixedControls();
   }
  
   onFileSelected(files: File[], fieldKey: string): void {
@@ -135,7 +142,8 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
         }
       }
  
-      payload = this.config.hasFile ? this.buildFormData(formValue) : this.buildPayload(formValue);
+      const valueWithFixedFields = this.applyFixedValues(formValue);
+      payload = this.config.hasFile ? this.buildFormData(valueWithFixedFields) : this.buildPayload(valueWithFixedFields);
       const result = await this.savePayload(payload);
       this.toastService.success(`${this.config.label} ${this.item ? 'actualizado' : 'creado'} correctamente`);
  
@@ -351,6 +359,26 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
       }
     }
 
+    this.syncFixedControls();
+    this.cdr.markForCheck();
+  }
+
+  private syncFixedControls(): void {
+    if (this.item) {
+      return;
+    }
+
+    Object.entries(this.fixedValues).forEach(([fieldKey, value]) => {
+      const control = this.form.get(fieldKey);
+
+      if (!control || control.value === value) {
+        return;
+      }
+
+      control.setValue(value, { emitEvent: false });
+      control.updateValueAndValidity({ emitEvent: false });
+    });
+
     this.cdr.markForCheck();
   }
  
@@ -373,9 +401,17 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
   isFieldRequired(field: EntityFieldConfig): boolean {
     return field.required;
   }
+
+  isFieldHidden(field: EntityFieldConfig): boolean {
+    return !this.item && this.hiddenFields.includes(field.key);
+  }
  
   getSelectOptions(field: EntityFieldConfig): any[] {
     return this.selectOptions[field.key] || field.options || [];
+  }
+
+  private applyFixedValues(formValue: Record<string, any>): Record<string, any> {
+    return this.item ? formValue : { ...formValue, ...this.fixedValues };
   }
  
   private getSaveErrorMessage(error: unknown): string {

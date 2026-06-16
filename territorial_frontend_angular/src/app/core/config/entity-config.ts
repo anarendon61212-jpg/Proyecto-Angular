@@ -201,7 +201,7 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
       { key: 'name', header: 'Nombre' },
       { key: 'email', header: 'Correo' },
       { key: 'phone', header: 'Teléfono', emptyValue: '—' },
-      { key: 'role', header: 'Rol' },
+      { key: 'role', header: 'Cargo' },
       { key: 'status', header: 'Estado' }
     ],
     fields: [
@@ -233,7 +233,7 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
       },
       {
         key: 'role',
-        label: 'Cargo / Rol',
+        label: 'Cargo',
         type: 'text',
         required: true,
         placeholder: 'Ej: Inspector, Gestor territorial',
