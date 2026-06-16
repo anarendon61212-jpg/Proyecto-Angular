@@ -3,6 +3,7 @@ import { Routes } from '@angular/router';
 import { AppShellComponent } from './core/layout/app-shell/app-shell.component';
 import { authGuard } from './core/guards/auth.guard';
 import { guestGuard } from './core/guards/guest.guard';
+import { roleGuard } from './core/guards/role.guard';
 
 export const routes: Routes = [
   {
@@ -77,6 +78,7 @@ export const routes: Routes = [
       },
       {
         path: 'territorios/comunas',
+        canActivate: [roleGuard(['Administrador'])],
         loadComponent: () => import('./features/communes/communes-list-generic.component').then((c) => c.CommunesListGenericComponent)
       },
       {

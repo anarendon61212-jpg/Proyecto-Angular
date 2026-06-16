@@ -37,7 +37,7 @@ import { CommunesFormComponent } from './communes-form.component';
       <ng-container *ngIf="collection() as collection">
         <app-data-table
           [title]="'Listado de ' + config.labelPlural"
-          [rows]="collection.items"
+          [rows]="rowsForTable(collection.items)"
           [columns]="tableColumns"
           [actions]="tableActions"
           (actionClick)="onTableAction($event)"
@@ -60,14 +60,16 @@ import { CommunesFormComponent } from './communes-form.component';
       size="md"
       (closed)="closeForm()"
     >
-      <app-communes-form
-        [config]="config"
-        [commune]="editingCommune()"
-        [selectOptions]="selectOptions()"
-        (saved)="onFormSaved($event)"
-        (cancelled)="closeForm()"
-        (valueChanges)="onFormValueChanged($event)"
-      ></app-communes-form>
+      @if (isFormOpen()) {
+        <app-communes-form
+          [config]="config"
+          [commune]="editingCommune()"
+          [selectOptions]="selectOptions()"
+          (saved)="onFormSaved($event)"
+          (cancelled)="closeForm()"
+          (valueChanges)="onFormValueChanged($event)"
+        ></app-communes-form>
+      }
     </app-drawer-panel>
   `,
   styles: [`
@@ -131,6 +133,9 @@ export class CommunesListGenericComponent implements OnInit {
   readonly isFormOpen = signal(false);
   readonly editingCommune = signal<Commune | null>(null);
   readonly selectOptions = signal<Record<string, any[]>>({});
+  readonly departmentsById = signal<Record<number, Department>>({});
+  readonly citiesById = signal<Record<number, City>>({});
+  readonly neighborhoodCounts = signal<Record<number, number>>({});
 
   readonly tableColumns: DataTableColumn[] = [];
   readonly tableActions = [
@@ -147,6 +152,7 @@ export class CommunesListGenericComponent implements OnInit {
     this.tableColumns.push(...this.config.columns);
     this.loadDepartments();
     this.loadCities();
+    this.loadNeighborhoodCounts();
     this.loadItems();
   }
 
@@ -165,6 +171,10 @@ export class CommunesListGenericComponent implements OnInit {
       .pipe(take(1))
       .subscribe((collection) => {
         this.departments = collection.items;
+        this.departmentsById.set(this.departments.reduce<Record<number, Department>>((departments, department) => {
+          departments[department.id_department] = department;
+          return departments;
+        }, {}));
         const currentOptions = this.selectOptions();
         this.selectOptions.set({
           ...currentOptions,
@@ -183,20 +193,38 @@ export class CommunesListGenericComponent implements OnInit {
       .subscribe((collection) => {
         this.allCities = collection.items;
         this.cities = this.allCities;
-        const currentOptions = this.selectOptions();
-        this.selectOptions.set({
-          ...currentOptions,
-          id_city: this.cities.map(city => ({
-            label: city.name,
-            value: city.id_city,
-            id_department: city.id_department
-          }))
-        });
+        this.citiesById.set(this.allCities.reduce<Record<number, City>>((cities, city) => {
+          cities[city.id_city] = city;
+          return cities;
+        }, {}));
+        this.setCityOptions(this.cities);
+      });
+  }
+
+  private loadNeighborhoodCounts(): void {
+    this.dependencyCheckService
+      .listCollection({ pageSize: 1000 })
+      .pipe(take(1))
+      .subscribe({
+        next: (collection) => {
+          const counts = collection.items.reduce<Record<number, number>>((summary, neighborhood) => {
+            summary[neighborhood.id_commune] = (summary[neighborhood.id_commune] || 0) + 1;
+            return summary;
+          }, {});
+
+          this.neighborhoodCounts.set(counts);
+        },
+        error: (error) => {
+          console.error('[CommunesListGeneric] Error cargando conteo de barrios:', error);
+          this.neighborhoodCounts.set({});
+        }
       });
   }
 
   openCreateForm(): void {
     this.editingCommune.set(null);
+    this.cities = this.allCities;
+    this.setCityOptions(this.cities);
     this.isFormOpen.set(true);
   }
 
@@ -218,7 +246,27 @@ export class CommunesListGenericComponent implements OnInit {
 
   onFormSaved(commune: Commune): void {
     this.closeForm();
+    this.loadNeighborhoodCounts();
     this.loadItems();
+  }
+
+  rowsForTable(items: Commune[]): any[] {
+    const citiesById = this.citiesById();
+    const departmentsById = this.departmentsById();
+    const neighborhoodCounts = this.neighborhoodCounts();
+
+    return items.map((commune) => {
+      const city = citiesById[commune.id_city];
+      const department = city ? departmentsById[city.id_department] : undefined;
+
+      return {
+        ...commune,
+        id_department: city?.id_department,
+        city_name: city?.name || (commune as any).city_name,
+        department_name: department?.name || (commune as any).department_name,
+        neighborhood_count: neighborhoodCounts[commune.id_commune] ?? (commune as any).neighborhood_count ?? 0
+      };
+    });
   }
 
   onFormValueChanged(formValues: Record<string, any>): void {
@@ -230,16 +278,20 @@ export class CommunesListGenericComponent implements OnInit {
       } else {
         this.cities = this.allCities;
       }
-      const currentOptions = this.selectOptions();
-      this.selectOptions.set({
-        ...currentOptions,
-        id_city: this.cities.map(city => ({
-          label: city.name,
-          value: city.id_city,
-          id_department: city.id_department
-        }))
-      });
+      this.setCityOptions(this.cities);
     }
+  }
+
+  private setCityOptions(cities: City[]): void {
+    const currentOptions = this.selectOptions();
+    this.selectOptions.set({
+      ...currentOptions,
+      id_city: cities.map(city => ({
+        label: city.name,
+        value: city.id_city,
+        id_department: city.id_department
+      }))
+    });
   }
 
   private async onDelete(commune: Commune): Promise<void> {
@@ -266,6 +318,7 @@ export class CommunesListGenericComponent implements OnInit {
       // Proceder con eliminación
       await this.crudService.delete(commune.id_commune).toPromise();
       this.toastService.success(`${this.config.label} eliminado correctamente`);
+      this.loadNeighborhoodCounts();
       this.loadItems();
     } catch (error) {
       this.toastService.danger('Error', `No se pudo eliminar el ${this.config.label.toLowerCase()}`);

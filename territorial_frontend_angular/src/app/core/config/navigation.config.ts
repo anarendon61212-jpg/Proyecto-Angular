@@ -39,7 +39,7 @@ export const MAIN_NAVIGATION: NavigationItem[] = [
     icon: '⌂',
     route: '/territorios/comunas',
     section: 'Gestión territorial',
-    roles: ['Administrador', 'Funcionario']
+    roles: ['Administrador']
   },
   {
     label: 'Barrios',

@@ -17,6 +17,7 @@ export interface EntityTableColumn {
   key: string;
   header: string;
   width?: string;
+  align?: 'left' | 'center' | 'right';
   emptyValue?: string;
   type?: 'text' | 'badge' | 'image';
   imageAltKey?: string;
@@ -425,8 +426,9 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
     ],
     columns: [
       { key: 'name', header: 'Nombre' },
-      { key: 'id_department', header: 'Departamento', emptyValue: '—' },
-      { key: 'id_city', header: 'Ciudad', emptyValue: '—' },
+      { key: 'department_name', header: 'Departamento', emptyValue: '—' },
+      { key: 'city_name', header: 'Ciudad', emptyValue: '—' },
+      { key: 'neighborhood_count', header: 'Barrios', align: 'center', emptyValue: '0' },
       { key: 'status', header: 'Estado' }
     ],
     fields: [
