@@ -23,6 +23,17 @@ export class TrackingService implements OnDestroy {
     return this.statusSubject.asObservable();
   }
 
+  emitLocationUpdate(payload: {
+    id_official: number;
+    latitude: number;
+    longitude: number;
+    lastUpdate: string;
+    gps_active: boolean;
+  }): void {
+    this.ensureSocket();
+    this.socket?.emit('location-update', payload);
+  }
+
   ngOnDestroy(): void {
     this.cleanupListeners();
     this.socket?.disconnect();
@@ -32,9 +43,11 @@ export class TrackingService implements OnDestroy {
 
   private ensureSocket(): void {
     if (!this.socket) {
-      const normalizedBasePath = this.config.apiBaseUrl.replace(/\/$/, '');
-      this.socket = io(this.config.apiBaseUrl, {
-        path: `${normalizedBasePath}/socket.io`,
+      const socketUrl = this.config.apiBaseUrl.startsWith('http')
+        ? this.config.apiBaseUrl
+        : window.location.origin;
+      this.socket = io(socketUrl, {
+        path: '/socket.io',
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionAttempts: Infinity,
@@ -60,7 +73,7 @@ export class TrackingService implements OnDestroy {
         this.statusSubject.next('error');
       });
 
-      this.socket.on('official_tracking', (payload: unknown) => {
+      this.socket.on('funcionarios-update', (payload: unknown) => {
         const normalizedPayload = this.normalizePayload(payload);
         if (normalizedPayload) {
           this.trackingSubject.next(normalizedPayload);
@@ -77,7 +90,7 @@ export class TrackingService implements OnDestroy {
     this.socket.off('disconnect');
     this.socket.off('connect_error');
     this.socket.off('error');
-    this.socket.off('official_tracking');
+    this.socket.off('funcionarios-update');
   }
 
   private normalizePayload(payload: unknown): TrackingPayload | null {
@@ -90,15 +103,28 @@ export class TrackingService implements OnDestroy {
       return null;
     }
 
-    const candidate = payload as Partial<TrackingPayload> & { official?: unknown };
+    const candidate = payload as Partial<TrackingPayload> & {
+      official?: unknown;
+      funcionarios?: unknown;
+      funcionario?: unknown;
+    };
 
     if (Array.isArray(candidate.officials)) {
       const officials = candidate.officials.filter((item): item is OfficialTracking => this.isOfficialTracking(item));
       return { officials };
     }
 
+    if (Array.isArray(candidate.funcionarios)) {
+      const officials = candidate.funcionarios.filter((item): item is OfficialTracking => this.isOfficialTracking(item));
+      return { officials };
+    }
+
     if (this.isOfficialTracking(candidate.official)) {
       return { officials: [candidate.official] };
+    }
+
+    if (this.isOfficialTracking(candidate.funcionario)) {
+      return { officials: [candidate.funcionario] };
     }
 
     return null;

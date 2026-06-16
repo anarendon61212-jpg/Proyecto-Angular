@@ -22,6 +22,13 @@ process.once('exit', () => {
 });
 
 module.exports = {
+  '/socket.io': {
+    target: 'http://127.0.0.1:5000',
+    ws: true,
+    secure: false,
+    changeOrigin: true,
+    logLevel: 'debug'
+  },
   '/api/auth/oauth': {
     target: 'http://127.0.0.1:5002',
     secure: false,

@@ -5,6 +5,7 @@ import { AuthService } from '../../auth/auth.service';
 import { MAIN_NAVIGATION, NavigationItem } from '../../config/navigation.config';
 import { TERRITORIAL_APP_CONFIG } from '../../config/territorial-app-config';
 import { LoadingService } from '../../services/loading.service';
+import { OfficialLocationService } from '../../services/official-location.service';
 import { ToastContainerComponent } from '@shared/components/toast-container/toast-container.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 
@@ -24,6 +25,7 @@ interface NavigationSection {
 export class AppShellComponent {
   private readonly authService = inject(AuthService);
   private readonly loadingService = inject(LoadingService);
+  private readonly officialLocationService = inject(OfficialLocationService);
   private readonly config = inject(TERRITORIAL_APP_CONFIG);
 
   readonly appName = this.config.appName;
@@ -31,6 +33,10 @@ export class AppShellComponent {
   readonly currentRole = this.authService.currentRole;
   readonly isLoading = this.loadingService.isLoading;
   readonly notificationCount = 3;
+
+  constructor() {
+    this.officialLocationService.bindSessionTracking();
+  }
 
   readonly navigationSections = computed<NavigationSection[]>(() => {
     const currentRole = this.authService.currentRole();

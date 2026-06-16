@@ -3,7 +3,7 @@ import { AfterViewInit, Component, ElementRef, inject, OnDestroy, ViewChild } fr
 import { FormControl, FormGroup, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import * as L from 'leaflet';
-import { combineLatest, forkJoin, Observable, of, Subject, takeUntil } from 'rxjs';
+import { combineLatest, forkJoin, Observable, of, Subject, Subscription, takeUntil } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 
 import {
@@ -64,6 +64,22 @@ interface SelectedAnnotationLocation {
   lat: number;
   lng: number;
   neighborhoodId: number;
+}
+
+interface OfficialTrackingSnapshot {
+  id_official: number;
+  id_entity?: number | null;
+  latitude: number;
+  longitude: number;
+  last_gps_update?: string | null;
+  lastUpdate?: string | null;
+  gps_active?: boolean;
+}
+
+interface EntityGeocodeCacheEntry {
+  lat: number;
+  lng: number;
+  address: string;
 }
 
 const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
@@ -225,6 +241,7 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
           <div class="map-legend">
             <span class="legend-item legend-item--neighborhood">Polígonos</span>
             <span class="legend-item legend-item--point">Puntos editables</span>
+            <span class="legend-item legend-item--entity">Entidades</span>
             <span class="legend-item legend-item--annotation" *ngIf="isAnnotationMode">Modo anotación activo</span>
           </div>
         </div>
@@ -234,6 +251,9 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
         </p>
         <p class="map-info-message" *ngIf="showPoints && pointFilters.annotation && hasAnnotationPoints && visibleAnnotationCount === 0">
           No hay anotaciones para los filtros seleccionados.
+        </p>
+        <p class="map-info-message" *ngIf="showNoOfficialsForSelectedEntity">
+          No hay funcionarios activos en la entidad filtrada.
         </p>
 
         <div #mapContainer class="leaflet-container" [class.annotation-cursor]="isAnnotationMode"></div>
@@ -292,6 +312,7 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     `.legend-item { align-items: center; border-radius: 999px; display: inline-flex; gap: 0.5rem; font-size: 0.9rem; padding: 0.6rem 0.85rem; }`,
     `.legend-item--neighborhood { background: rgba(20, 89, 245, 0.1); color: var(--color-primary); }`,
     `.legend-item--point { background: rgba(239, 35, 60, 0.1); color: var(--color-danger); }`,
+    `.legend-item--entity { background: rgba(22, 163, 74, 0.12); color: #15803d; }`,
     `.legend-item--annotation { background: rgba(255, 165, 0, 0.15); color: #b45309; font-weight: 600; }`,
     `.leaflet-container { min-height: 640px; width: 100%; border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }`,
     `.map-point-marker { width: 16px; height: 16px; border: 2px solid #ffffff; border-radius: 50%; background: var(--color-danger); box-shadow: 0 0 0 5px rgba(239, 35, 60, 0.16); }`,
@@ -388,19 +409,25 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private neighborhoodLayer = L.layerGroup();
   private pointLayer = L.layerGroup();
   private annotationLayer = L.layerGroup();
+  private entityLayer = L.layerGroup();
   private selectedNeighborhoodLayer = L.layerGroup();
   private editingLayer = L.layerGroup();
   private trackingLayer = L.layerGroup();
   private officialsById = new Map<number, Official>();
   private officialMarkers = new Map<number, L.Marker>();
-  private simulatedOfficials = new Map<number, {
-    latitude: number;
-    longitude: number;
-    gps_active: boolean;
-  }>();
+  private latestTrackingByOfficial = new Map<number, OfficialTrackingSnapshot>();
+  private readonly entityGeocodeStorageKey = 'territorial.map.entityGeocodes.v1';
+  private readonly realtimeOfficialsToggleStorageKey = 'territorial.map.showRealtimeOfficials';
+  private readonly entityGeocodeCache = new Map<number, EntityGeocodeCacheEntry>();
+  private readonly failedEntityGeocodeAddress = new Map<number, string>();
+  private readonly pendingEntityGeocoding = new Set<number>();
+  private readonly renderedEntityCoordsById = new Map<number, L.LatLngTuple>();
+  private mapEntities: Entity[] = [];
   private polygonPoints: L.LatLng[] = [];
   private polygonMarkers: L.Marker[] = [];
   private polygonLine: L.Polyline | null = null;
+  private officialsPollingSubscription: Subscription | null = null;
+  private officialOfflineIntervalId: ReturnType<typeof setInterval> | null = null;
   selectedNeighborhoodId: number | null = null;
   private existingPolygonPoints: Point[] = [];
 
@@ -416,6 +443,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   trackingEntities: Entity[] = [];
   selectedEntityFilter: number | null = null;
   showRealtimeOfficials = true;
+  showNoOfficialsForSelectedEntity = false;
   categoryFilterTree: CategoryTreeNode[] = [];
   selectedFilterCategoryIds = new Set<number>();
   expandedFilterCategoryIds = new Set<number>();
@@ -456,19 +484,26 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   ngAfterViewInit(): void {
+    this.restoreRealtimeOfficialsToggle();
+    this.restoreEntityGeocodeCache();
     this.initializeMap();
     this.loadTerritorialData();
     this.loadAnnotationFormData();
     this.loadOfficialsBaseData();
+    this.startOfficialsFallbackPolling();
     this.initializeTracking();
-    setTimeout(() => {
-      this.initializeDemoTracking();
-    }, 1500);
+    this.startOfficialOfflineDetector();
 
     this.editingLayer.addTo(this.map);
   }
 
   ngOnDestroy(): void {
+    this.officialsPollingSubscription?.unsubscribe();
+    this.officialsPollingSubscription = null;
+    if (this.officialOfflineIntervalId != null) {
+      clearInterval(this.officialOfflineIntervalId);
+      this.officialOfflineIntervalId = null;
+    }
     this.destroy$.next();
     this.destroy$.complete();
   }
@@ -532,9 +567,10 @@ export class MapComponent implements AfterViewInit, OnDestroy {
 
   toggleRealtimeOfficials(enabled: boolean): void {
     this.showRealtimeOfficials = enabled;
+    this.persistRealtimeOfficialsToggle();
     if (!enabled) {
       this.trackingLayer.clearLayers();
-      this.officialMarkers.clear();
+      this.showNoOfficialsForSelectedEntity = false;
       return;
     }
     this.rebuildVisibleTrackingMarkers();
@@ -1343,6 +1379,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     this.setBaseLayer('streets');
     this.neighborhoodLayer.addTo(this.map);
     this.annotationLayer.addTo(this.map);
+    this.entityLayer.addTo(this.map);
     this.pointLayer.addTo(this.map);
     this.selectedNeighborhoodLayer.addTo(this.map);
     this.trackingLayer.addTo(this.map);
@@ -1359,17 +1396,22 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       this.annotationService.listCollection().pipe(
         catchError(() => of({ items: [] as Annotation[], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
       ),
+      this.entityService.listCollection().pipe(
+        catchError(() => of({ items: [] as Entity[], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+      ),
       this.loadCategoryFilterData()
     ])
       .pipe(takeUntil(this.destroy$))
-      .subscribe(([neighborhoodCollection, pointCollection, annotationCollection, categoryFilterData]) => {
+      .subscribe(([neighborhoodCollection, pointCollection, annotationCollection, entityCollection, categoryFilterData]) => {
         this.neighborhoods = neighborhoodCollection.items;
         this.points = pointCollection.items;
+        this.mapEntities = entityCollection.items;
         this.annotationDescriptionMap = new Map(
           annotationCollection.items.map((annotation) => [annotation.id_annotation, annotation.description ?? ''])
         );
         this.initializeCategoryFilterState(categoryFilterData.categories, categoryFilterData.annotationCategories);
         this.refreshMapLayers();
+        this.refreshEntityMarkers();
       });
   }
 
@@ -1388,6 +1430,199 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     if (this.showPoints) {
       this.renderPointMarkers();
     }
+  }
+
+  private refreshEntityMarkers(): void {
+    if (this.mapEntities.length === 0) return;
+    this.entityLayer.clearLayers();
+    this.renderedEntityCoordsById.clear();
+
+    for (const entity of this.mapEntities) {
+      if (!this.isEntityStatusActive(entity.status)) {
+        continue;
+      }
+
+      const coords = this.getEntityCoordsFromCache(entity);
+      if (coords) {
+        this.addEntityMarker(entity, coords, false);
+        continue;
+      }
+
+      const officialCoords = this.getEntityCoordsFromOfficials(entity.id_entity);
+      if (officialCoords) {
+        this.addEntityMarker(entity, officialCoords, false);
+      } else {
+        this.addEntityMarker(entity, this.getEntityFallbackCoords(entity.id_entity), true);
+      }
+
+      const address = this.normalizeAddress(entity.address);
+      const failedAddress = this.failedEntityGeocodeAddress.get(entity.id_entity);
+      if (!address || this.pendingEntityGeocoding.has(entity.id_entity) || failedAddress === address) {
+        continue;
+      }
+
+      this.pendingEntityGeocoding.add(entity.id_entity);
+      void this.geocodeEntityAddress(entity, address);
+    }
+  }
+
+  private addEntityMarker(entity: Entity, coords: L.LatLngTuple, approximate: boolean): void {
+    const officialsCount = this.countOfficialsForEntity(entity.id_entity);
+    this.renderedEntityCoordsById.set(entity.id_entity, coords);
+    const marker = L.marker(coords, {
+      icon: L.divIcon({
+        className: 'map-entity-marker',
+        html: `<div style="width: 18px; height: 18px; border: 2px solid #fff; border-radius: 50%; background: #16a34a; box-shadow: 0 0 0 5px rgba(22, 163, 74, 0.22);"></div>`
+      }),
+      draggable: false
+    });
+    marker.bindTooltip(entity.name, { direction: 'top' });
+    marker.bindPopup(
+      `<strong>${entity.name}</strong><br>` +
+      `NIT: ${entity.nit ?? 'Sin dato'}<br>` +
+      `Dirección: ${entity.address ?? 'Sin dato'}<br>` +
+      `Teléfono: ${entity.phone ?? 'Sin dato'}<br>` +
+      `Correo: ${entity.email ?? 'Sin dato'}<br>` +
+      `Funcionarios: ${officialsCount}<br>` +
+      `Ubicación: ${approximate ? 'Aproximada' : 'Precisa'}<br>` +
+      `Estado: ${entity.status ?? 'Sin dato'}`
+    );
+    this.entityLayer.addLayer(marker);
+  }
+
+  private async geocodeEntityAddress(entity: Entity, address: string): Promise<void> {
+    try {
+      const query = encodeURIComponent(`${address}, Manizales, Colombia`);
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${query}`, {
+        headers: {
+          Accept: 'application/json'
+        }
+      });
+      if (!response.ok) {
+        return;
+      }
+
+      const results = await response.json() as Array<{ lat: string; lon: string }>;
+      const first = results[0];
+      if (!first) return;
+
+      const lat = Number(first.lat);
+      const lng = Number(first.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+      this.entityGeocodeCache.set(entity.id_entity, {
+        lat,
+        lng,
+        address
+      });
+      this.failedEntityGeocodeAddress.delete(entity.id_entity);
+      this.persistEntityGeocodeCache();
+      this.refreshEntityMarkers();
+    } catch {
+      // Best effort: geocoding may fail for ambiguous addresses.
+      this.failedEntityGeocodeAddress.set(entity.id_entity, address);
+    } finally {
+      this.pendingEntityGeocoding.delete(entity.id_entity);
+    }
+  }
+
+  private getEntityCoordsFromCache(entity: Entity): L.LatLngTuple | null {
+    const cached = this.entityGeocodeCache.get(entity.id_entity);
+    if (!cached) return null;
+    if (cached.address !== this.normalizeAddress(entity.address)) {
+      this.entityGeocodeCache.delete(entity.id_entity);
+      return null;
+    }
+    return [cached.lat, cached.lng];
+  }
+
+  private normalizeAddress(value: string | null | undefined): string {
+    return (value ?? '').trim().toLowerCase();
+  }
+
+  private getEntityCoordsFromOfficials(entityId: number): L.LatLngTuple | null {
+    for (const tracking of this.latestTrackingByOfficial.values()) {
+      const official = this.officialsById.get(tracking.id_official);
+      const trackedEntityId = tracking.id_entity ?? official?.id_entity ?? null;
+      if (trackedEntityId !== entityId) {
+        continue;
+      }
+
+      if (
+        Number.isFinite(tracking.latitude)
+        && Number.isFinite(tracking.longitude)
+      ) {
+        return [tracking.latitude, tracking.longitude];
+      }
+    }
+    return null;
+  }
+
+  private getEntityFallbackCoords(entityId: number): L.LatLngTuple {
+    const baseLat = 5.074;
+    const baseLng = -75.515;
+    const angleDeg = (entityId * 137.5) % 360;
+    const angleRad = angleDeg * (Math.PI / 180);
+    const radius = 0.0028 + ((entityId % 5) * 0.00045);
+    const lat = baseLat + (Math.sin(angleRad) * radius);
+    const lng = baseLng + (Math.cos(angleRad) * radius);
+    return [lat, lng];
+  }
+
+  private countOfficialsForEntity(entityId: number): number {
+    let count = 0;
+    for (const official of this.officialsById.values()) {
+      if (official.id_entity === entityId) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  private restoreEntityGeocodeCache(): void {
+    const raw = localStorage.getItem(this.entityGeocodeStorageKey);
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, EntityGeocodeCacheEntry>;
+      for (const [id, entry] of Object.entries(parsed)) {
+        const entityId = Number(id);
+        if (!Number.isFinite(entityId)) continue;
+        if (
+          !entry
+          || typeof entry.lat !== 'number'
+          || typeof entry.lng !== 'number'
+          || typeof entry.address !== 'string'
+        ) {
+          continue;
+        }
+        this.entityGeocodeCache.set(entityId, entry);
+      }
+    } catch {
+      localStorage.removeItem(this.entityGeocodeStorageKey);
+    }
+  }
+
+  private persistEntityGeocodeCache(): void {
+    const serializable: Record<string, EntityGeocodeCacheEntry> = {};
+    for (const [id, entry] of this.entityGeocodeCache.entries()) {
+      serializable[String(id)] = entry;
+    }
+    localStorage.setItem(this.entityGeocodeStorageKey, JSON.stringify(serializable));
+  }
+
+  private restoreRealtimeOfficialsToggle(): void {
+    const raw = localStorage.getItem(this.realtimeOfficialsToggleStorageKey);
+    if (raw === 'true') {
+      this.showRealtimeOfficials = true;
+      return;
+    }
+    if (raw === 'false') {
+      this.showRealtimeOfficials = false;
+    }
+  }
+
+  private persistRealtimeOfficialsToggle(): void {
+    localStorage.setItem(this.realtimeOfficialsToggleStorageKey, String(this.showRealtimeOfficials));
   }
 
   private renderNeighborhoodPolygons(): void {
@@ -1678,28 +1913,122 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     ])
       .pipe(takeUntil(this.destroy$))
       .subscribe(([officialCollection, entityCollection]) => {
-        this.trackingEntities = entityCollection.items;
-        this.officialsById.clear();
-        for (const official of officialCollection.items) {
-          this.officialsById.set(official.id_official, official);
-        }
+        this.applyEntityBaseState(entityCollection.items);
+        this.applyOfficialsBaseState(officialCollection.items);
       });
   }
 
-  private initializeDemoTracking(): void {
-    for (const official of this.officialsById.values()) {
-      const latitude = 5.0689 + ((Math.random() - 0.5) * 0.02);
-      const longitude = -75.5174 + ((Math.random() - 0.5) * 0.02);
-      const gps_active = Math.random() > 0.2;
-
-      this.simulatedOfficials.set(official.id_official, {
-        latitude,
-        longitude,
-        gps_active
+  private startOfficialsFallbackPolling(): void {
+    this.officialsPollingSubscription?.unsubscribe();
+    this.officialsPollingSubscription = combineLatest([
+      this.officialService.listCollection(),
+      this.entityService.listCollection()
+    ])
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: ([officialCollection, entityCollection]) => {
+          this.applyEntityBaseState(entityCollection.items);
+          this.applyOfficialsBaseState(officialCollection.items);
+        }
       });
 
-      this.updateOfficialMarker(official, latitude, longitude, gps_active);
+    const pollingMs = 15000;
+    const schedule = window.setInterval(() => {
+      combineLatest([
+        this.officialService.listCollection(),
+        this.entityService.listCollection()
+      ])
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: ([officialCollection, entityCollection]) => {
+            this.applyEntityBaseState(entityCollection.items);
+            this.applyOfficialsBaseState(officialCollection.items);
+          }
+        });
+    }, pollingMs);
+
+    this.officialsPollingSubscription.add(() => window.clearInterval(schedule));
+  }
+
+  private applyOfficialsBaseState(officials: Official[]): void {
+    const incomingOfficialIds = new Set<number>();
+    this.officialsById.clear();
+
+    for (const official of officials) {
+      incomingOfficialIds.add(official.id_official);
+      this.officialsById.set(official.id_official, official);
+      if (!this.isOfficialStatusActive(official.status)) {
+        this.latestTrackingByOfficial.delete(official.id_official);
+        this.removeOfficialMarker(official.id_official);
+        continue;
+      }
+
+      const coords = this.resolveOfficialDisplayCoords(official);
+      if (!coords) {
+        continue;
+      }
+
+      const snapshot: OfficialTrackingSnapshot = {
+        id_official: official.id_official,
+        id_entity: official.id_entity,
+        latitude: coords[0],
+        longitude: coords[1],
+        last_gps_update: official.last_gps_update ?? null,
+        lastUpdate: official.last_gps_update ?? null,
+        gps_active: official.gps_active
+      };
+      this.latestTrackingByOfficial.set(official.id_official, snapshot);
     }
+
+    for (const trackedId of Array.from(this.latestTrackingByOfficial.keys())) {
+      if (!incomingOfficialIds.has(trackedId)) {
+        this.latestTrackingByOfficial.delete(trackedId);
+        this.removeOfficialMarker(trackedId);
+      }
+    }
+
+    if (this.showRealtimeOfficials) {
+      this.rebuildVisibleTrackingMarkers();
+    }
+    this.refreshEntityMarkers();
+  }
+
+  private resolveOfficialDisplayCoords(official: Official): L.LatLngTuple | null {
+    if (
+      typeof official.last_latitude === 'number'
+      && typeof official.last_longitude === 'number'
+      && Number.isFinite(official.last_latitude)
+      && Number.isFinite(official.last_longitude)
+    ) {
+      return [official.last_latitude, official.last_longitude];
+    }
+
+    const entity = this.mapEntities.find((item) => item.id_entity === official.id_entity);
+    if (entity) {
+      const fromEntityCache = this.getEntityCoordsFromCache(entity);
+      if (fromEntityCache) {
+        return fromEntityCache;
+      }
+    }
+
+    const fromOtherOfficials = this.getEntityCoordsFromOfficials(official.id_entity);
+    if (fromOtherOfficials) {
+      return fromOtherOfficials;
+    }
+
+    return this.getEntityFallbackCoords(official.id_entity);
+  }
+
+  private applyEntityBaseState(entities: Entity[]): void {
+    // Defensive guard: do not wipe already-rendered entities
+    // when backend temporarily responds empty during polling/reconnect.
+    if (entities.length === 0 && this.mapEntities.length > 0) {
+      return;
+    }
+
+    this.trackingEntities = entities;
+    this.mapEntities = entities;
+    this.refreshEntityMarkers();
   }
 
   private initializeTracking(): void {
@@ -1729,8 +2058,37 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     }
 
     for (const officialTracking of payload.officials) {
-      this.updateOfficialMarker(officialTracking);
+      const normalized: OfficialTrackingSnapshot = {
+        ...officialTracking,
+        lastUpdate: officialTracking.lastUpdate ?? officialTracking.last_gps_update ?? new Date().toISOString(),
+        last_gps_update: officialTracking.last_gps_update ?? officialTracking.lastUpdate ?? new Date().toISOString()
+      };
+      this.latestTrackingByOfficial.set(officialTracking.id_official, normalized);
+      this.updateOfficialMarker(normalized);
     }
+    this.refreshEntityMarkers();
+  }
+
+  private startOfficialOfflineDetector(): void {
+    if (this.officialOfflineIntervalId != null) return;
+    this.officialOfflineIntervalId = setInterval(() => {
+      const nowMs = Date.now();
+      const staleMs = 30_000;
+      let changed = false;
+      for (const tracking of this.latestTrackingByOfficial.values()) {
+        const ts = tracking.lastUpdate ?? tracking.last_gps_update;
+        if (!ts) continue;
+        const trackedAt = new Date(ts).getTime();
+        if (!Number.isFinite(trackedAt)) continue;
+        if ((nowMs - trackedAt) > staleMs && tracking.gps_active !== false) {
+          tracking.gps_active = false;
+          changed = true;
+        }
+      }
+      if (changed) {
+        this.rebuildVisibleTrackingMarkers();
+      }
+    }, 5_000);
   }
 
   private updateOfficialMarker(officialTracking: OfficialTracking): void;
@@ -1749,19 +2107,20 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     if (typeof latitude === 'number' && typeof longitude === 'number' && typeof gps_active === 'boolean' && 'name' in officialOrTracking) {
       const official = officialOrTracking;
       const officialId = official.id_official;
+      const adjustedCoords = this.getAdjustedOfficialCoords(officialId, official.id_entity, [latitude, longitude]);
       const entityName = this.trackingEntities.find((entity) => entity.id_entity === official.id_entity)?.name ?? `#${official.id_entity}`;
       const gpsStatus = gps_active ? 'GPS activo' : 'Sin conexión';
       const popupContent = `<strong>${official.name}</strong><br>Entidad: ${entityName}<br>Estado: ${gpsStatus}`;
       const existingMarker = this.officialMarkers.get(officialId);
 
       if (existingMarker) {
-        existingMarker.setLatLng([latitude, longitude]);
+        existingMarker.setLatLng(adjustedCoords);
         existingMarker.setIcon(this.buildOfficialIcon(gps_active));
         existingMarker.bindPopup(popupContent);
         return;
       }
 
-      const marker = L.marker([latitude, longitude], {
+      const marker = L.marker(adjustedCoords, {
         icon: this.buildOfficialIcon(gps_active),
         draggable: false
       });
@@ -1773,33 +2132,48 @@ export class MapComponent implements AfterViewInit, OnDestroy {
 
     const officialTracking = officialOrTracking as OfficialTracking;
     const knownOfficial = this.officialsById.get(officialTracking.id_official);
+    if (knownOfficial && !this.isOfficialStatusActive(knownOfficial.status)) {
+      this.removeOfficialMarker(officialTracking.id_official);
+      this.latestTrackingByOfficial.delete(officialTracking.id_official);
+      this.updateNoOfficialsMessageState();
+      return;
+    }
     const entityId = officialTracking.id_entity ?? knownOfficial?.id_entity ?? null;
 
     if (knownOfficial && entityId !== null) {
       knownOfficial.id_entity = entityId;
     }
 
+    const adjustedTrackingCoords = this.getAdjustedOfficialCoords(
+      officialTracking.id_official,
+      entityId,
+      [officialTracking.latitude, officialTracking.longitude]
+    );
+
     if (!this.showRealtimeOfficials || !this.isOfficialVisibleForFilters(officialTracking.id_official, entityId)) {
       this.removeOfficialMarker(officialTracking.id_official);
+      this.updateNoOfficialsMessageState();
       return;
     }
 
     const existingMarker = this.officialMarkers.get(officialTracking.id_official);
 
     if (existingMarker) {
-      existingMarker.setLatLng([officialTracking.latitude, officialTracking.longitude]);
+      existingMarker.setLatLng(adjustedTrackingCoords);
       existingMarker.setIcon(this.buildOfficialIcon(officialTracking.gps_active !== false));
       existingMarker.bindPopup(this.buildOfficialPopupContent(officialTracking));
+      this.updateNoOfficialsMessageState();
       return;
     }
 
-    const marker = L.marker([officialTracking.latitude, officialTracking.longitude], {
+    const marker = L.marker(adjustedTrackingCoords, {
       icon: this.buildOfficialIcon(officialTracking.gps_active !== false),
       draggable: false
     });
     marker.bindPopup(this.buildOfficialPopupContent(officialTracking));
     this.officialMarkers.set(officialTracking.id_official, marker);
     marker.addTo(this.trackingLayer);
+    this.updateNoOfficialsMessageState();
   }
 
   private buildOfficialIcon(gps_active: boolean): L.DivIcon {
@@ -1834,11 +2208,48 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   }
 
   private buildOfficialPopupContent(officialTracking: OfficialTracking): string {
+    const knownOfficial = this.officialsById.get(officialTracking.id_official);
+    const entityId = officialTracking.id_entity ?? knownOfficial?.id_entity ?? null;
+    const entityName = entityId != null
+      ? (this.trackingEntities.find((entity) => entity.id_entity === entityId)?.name ?? `#${entityId}`)
+      : 'Sin entidad';
     const lastUpdate = officialTracking.last_gps_update
       ? new Date(officialTracking.last_gps_update).toLocaleString()
       : 'Sin dato';
     const gpsStatus = officialTracking.gps_active === false ? 'Sin conexión' : 'Activo';
-    return `<strong>Funcionario #${officialTracking.id_official}</strong><br>Última actualización: ${lastUpdate}<br>Estado GPS: ${gpsStatus}`;
+    return `<strong>${knownOfficial?.name ?? `Funcionario #${officialTracking.id_official}`}</strong><br>`
+      + `Correo: ${knownOfficial?.email ?? 'Sin dato'}<br>`
+      + `Teléfono: ${knownOfficial?.phone ?? 'Sin dato'}<br>`
+      + `Rol: ${knownOfficial?.role ?? 'Sin dato'}<br>`
+      + `Entidad: ${entityName}<br>`
+      + `Última actualización: ${lastUpdate}<br>`
+      + `Estado GPS: ${gpsStatus}`;
+  }
+
+  private getAdjustedOfficialCoords(
+    officialId: number,
+    entityId: number | null,
+    coords: L.LatLngTuple
+  ): L.LatLngTuple {
+    if (entityId == null) return coords;
+    const entityCoords = this.renderedEntityCoordsById.get(entityId);
+    if (!entityCoords) return coords;
+
+    const overlapThreshold = 0.00002;
+    if (
+      Math.abs(coords[0] - entityCoords[0]) > overlapThreshold
+      || Math.abs(coords[1] - entityCoords[1]) > overlapThreshold
+    ) {
+      return coords;
+    }
+
+    const angleDeg = (officialId * 53) % 360;
+    const angleRad = angleDeg * (Math.PI / 180);
+    const radius = 0.00022;
+    return [
+      entityCoords[0] + (Math.sin(angleRad) * radius),
+      entityCoords[1] + (Math.cos(angleRad) * radius)
+    ];
   }
 
   private isOfficialVisibleForFilters(idOfficial: number, entityId: number | null): boolean {
@@ -1853,21 +2264,42 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     if (!marker) return;
     this.trackingLayer.removeLayer(marker);
     this.officialMarkers.delete(idOfficial);
+    this.updateNoOfficialsMessageState();
   }
 
   private rebuildVisibleTrackingMarkers(): void {
     this.trackingLayer.clearLayers();
-    const existingEntries = Array.from(this.officialMarkers.entries());
     this.officialMarkers.clear();
 
-    for (const [idOfficial, marker] of existingEntries) {
-      const knownOfficial = this.officialsById.get(idOfficial);
-      const entityId = knownOfficial?.id_entity ?? null;
-      if (!this.showRealtimeOfficials || !this.isOfficialVisibleForFilters(idOfficial, entityId)) {
-        continue;
-      }
-      this.trackingLayer.addLayer(marker);
-      this.officialMarkers.set(idOfficial, marker);
+    if (!this.showRealtimeOfficials) {
+      this.showNoOfficialsForSelectedEntity = false;
+      return;
     }
+
+    for (const tracking of this.latestTrackingByOfficial.values()) {
+      this.updateOfficialMarker(tracking);
+    }
+    this.updateNoOfficialsMessageState();
+  }
+
+  private isOfficialStatusActive(status: unknown): boolean {
+    if (typeof status !== 'string') return false;
+    const normalized = status.trim().toLowerCase();
+    return normalized === 'active' || normalized === 'activo' || normalized === 'activa';
+  }
+
+  private isEntityStatusActive(status: unknown): boolean {
+    if (typeof status !== 'string') return false;
+    const normalized = status.trim().toLowerCase();
+    return normalized === 'active' || normalized === 'activo' || normalized === 'activa';
+  }
+
+  private updateNoOfficialsMessageState(): void {
+    if (!this.showRealtimeOfficials || this.selectedEntityFilter == null) {
+      this.showNoOfficialsForSelectedEntity = false;
+      return;
+    }
+
+    this.showNoOfficialsForSelectedEntity = this.officialMarkers.size === 0;
   }
 }

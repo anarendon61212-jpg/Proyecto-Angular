@@ -39,12 +39,26 @@ export interface Official {
   gps_active: boolean;
 }
 
+export interface OfficialCreatePayload {
+  id_entity: number;
+  name: string;
+  email: string;
+  phone?: string | null;
+  role: string;
+  status: TerritorialStatus;
+  last_latitude?: number | null;
+  last_longitude?: number | null;
+  last_gps_update?: IsoDateString | null;
+  gps_active?: boolean;
+}
+
 export interface OfficialTracking {
   id_official: number;
   id_entity?: number | null;
   latitude: number;
   longitude: number;
   last_gps_update?: IsoDateString | null;
+  lastUpdate?: IsoDateString | null;
   gps_active?: boolean;
 }
 

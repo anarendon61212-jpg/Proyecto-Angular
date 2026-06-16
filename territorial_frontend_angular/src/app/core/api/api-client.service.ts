@@ -38,6 +38,12 @@ export class ApiClient {
   }
 
   update<TResponse, TBody = unknown>(resource: string, id: EntityId, body: TBody): Observable<TResponse> {
+    console.group('[HTTP PUT] Request');
+    console.log('Resource:', resource);
+    console.log('ID:', id);
+    console.log('URL:', this.url(`${resource}/${id}`));
+    console.log('Body:', body);
+    console.groupEnd();
     return this.http.put<TResponse>(this.url(`${resource}/${id}`), body);
   }
 
