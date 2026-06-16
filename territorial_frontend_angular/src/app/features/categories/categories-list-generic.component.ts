@@ -15,6 +15,7 @@ import { getEntityConfig } from '@core/config/entity-config';
       [crudService]="crudService"
       [selectOptions]="selectOptions()"
       [dependencyCheckServices]="dependencyCheckServices"
+      (saved)="onCategorySaved()"
     ></app-generic-crud-list>
   `
 })
@@ -29,6 +30,10 @@ export class CategoriesListGenericComponent implements OnInit {
   };
 
   ngOnInit(): void {
+    this.loadParentCategoryOptions();
+  }
+
+  onCategorySaved(): void {
     this.loadParentCategoryOptions();
   }
 

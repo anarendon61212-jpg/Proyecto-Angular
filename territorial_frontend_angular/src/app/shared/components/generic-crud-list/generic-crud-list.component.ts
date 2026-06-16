@@ -139,6 +139,7 @@ export class GenericCrudListComponent implements OnInit {
   }
 
   @Output() formValueChanged = new EventEmitter<Record<string, any>>();
+  @Output() saved = new EventEmitter<any>();
  
   readonly collection = signal<ApiCollection<any> | null>(null);
   readonly isFormOpen = signal(false);
@@ -190,6 +191,7 @@ export class GenericCrudListComponent implements OnInit {
   onFormSaved(item: any): void {
     this.closeForm();
     this.loadItems();
+    this.saved.emit(item);
   }
 
   onFormValueChanged(formValues: Record<string, any>): void {
