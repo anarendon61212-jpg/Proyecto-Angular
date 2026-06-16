@@ -41,6 +41,7 @@ import { getEntityConfig } from '@core/config/entity-config';
       [selectOptions]="selectOptions()"
       [fixedValues]="fixedValues()"
       [hiddenFields]="hiddenFields()"
+      [autoRefreshMs]="15000"
     ></app-generic-crud-list>
   `,
   styles: [`

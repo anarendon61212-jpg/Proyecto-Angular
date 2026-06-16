@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnInit, Output, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, EventEmitter, Input, OnDestroy, OnInit, Output, inject, signal } from '@angular/core';
 import { take } from 'rxjs';
  
 import { CrudResourceService, ApiCollection } from '@core/api/crud-resource.service';
@@ -133,7 +133,7 @@ interface DependencyCheckResult {
   `],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class GenericCrudListComponent implements OnInit {
+export class GenericCrudListComponent implements OnInit, OnDestroy {
   private readonly confirmDialogService = inject(ConfirmDialogService);
   private readonly toastService = inject(ToastService);
  
@@ -144,6 +144,7 @@ export class GenericCrudListComponent implements OnInit {
   @Input() extraTableActions: DataTableAction<any>[] = [];
   @Input() fixedValues: Record<string, any> = {};
   @Input() hiddenFields: string[] = [];
+  @Input() autoRefreshMs: number | null = null;
   @Input() set selectOptions(options: Record<string, any[]> | null | undefined) {
     this.formSelectOptions.set(options ?? {});
   }
@@ -156,6 +157,7 @@ export class GenericCrudListComponent implements OnInit {
   readonly isFormOpen = signal(false);
   readonly editingItem = signal<any | null>(null);
   readonly formSelectOptions = signal<Record<string, any[]>>({});
+  private autoRefreshIntervalId: ReturnType<typeof setInterval> | null = null;
  
   readonly tableColumns: DataTableColumn[] = [];
   readonly tableActions = [
@@ -171,6 +173,14 @@ export class GenericCrudListComponent implements OnInit {
     this.tableColumns.length = 0;
     this.tableColumns.push(...this.config.columns);
     this.loadItems();
+    this.setupAutoRefresh();
+  }
+
+  ngOnDestroy(): void {
+    if (this.autoRefreshIntervalId != null) {
+      clearInterval(this.autoRefreshIntervalId);
+      this.autoRefreshIntervalId = null;
+    }
   }
  
   private loadItems(): void {
@@ -180,6 +190,17 @@ export class GenericCrudListComponent implements OnInit {
       .subscribe((collection) => {
         this.collection.set(collection);
       });
+  }
+
+  private setupAutoRefresh(): void {
+    const intervalMs = Number(this.autoRefreshMs ?? 0);
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      return;
+    }
+
+    this.autoRefreshIntervalId = setInterval(() => {
+      this.loadItems();
+    }, intervalMs);
   }
  
   openCreateForm(): void {
