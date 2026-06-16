@@ -45,7 +45,7 @@ interface DependencyCheckResult {
       <ng-container *ngIf="collection() as collection">
         <app-data-table
           [title]="'Listado de ' + config.labelPlural"
-          [rows]="collection.items"
+          [rows]="rowsForTable(collection.items)"
           [columns]="tableColumns"
           [actions]="tableActions"
           (actionClick)="onTableAction($event)"
@@ -194,6 +194,29 @@ export class GenericCrudListComponent implements OnInit {
 
   onFormValueChanged(formValues: Record<string, any>): void {
     this.formValueChanged.emit(formValues);
+  }
+
+  rowsForTable(items: any[]): any[] {
+    const selectOptions = this.formSelectOptions();
+
+    return items.map((item) => {
+      const decoratedItem = { ...item };
+
+      for (const field of this.config.fields) {
+        if (field.type !== 'select') {
+          continue;
+        }
+
+        const option = (selectOptions[field.key] || field.options || [])
+          .find((currentOption) => String(currentOption.value) === String(item[field.key]));
+
+        if (option) {
+          decoratedItem[`${field.key}_label`] = option.label;
+        }
+      }
+
+      return decoratedItem;
+    });
   }
  
   private async onDelete(item: any): Promise<void> {

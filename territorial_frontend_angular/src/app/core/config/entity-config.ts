@@ -20,6 +20,7 @@ export interface EntityTableColumn {
   emptyValue?: string;
   type?: 'text' | 'badge' | 'image';
   imageAltKey?: string;
+  formatter?: (row: any) => string | number | null | undefined;
 }
  
 export interface DependencyCheck {
@@ -327,6 +328,7 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
     idField: 'id_category',
     hasFile: true,
     fileField: 'file',
+    filePreviewField: 'image_url',
     searchEndpoint: 'categories/search',
     dependencyChecks: [
       {
@@ -343,8 +345,14 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
       }
     ],
     columns: [
+      { key: 'image_url', header: 'Imagen', type: 'image', imageAltKey: 'name', width: '96px', emptyValue: 'Sin imagen' },
       { key: 'name', header: 'Nombre' },
-      { key: 'id_parent_category', header: 'Categoría Padre', emptyValue: '—' },
+      {
+        key: 'category_type',
+        header: 'Tipo',
+        formatter: (row) => row.id_parent_category ? 'Subcategoría' : 'Categoría padre'
+      },
+      { key: 'id_parent_category_label', header: 'Categoría Padre', emptyValue: 'Sin categoría padre' },
       { key: 'description', header: 'Descripción', emptyValue: '—' },
       { key: 'status', header: 'Estado' }
     ],
