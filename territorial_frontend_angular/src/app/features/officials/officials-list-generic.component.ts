@@ -5,7 +5,8 @@ import { take } from 'rxjs';
 import { GenericCrudListComponent } from '@shared/components/generic-crud-list/generic-crud-list.component';
 import {
   OfficialCrudService,
-  EntityCrudService
+  EntityCrudService,
+  InterestedPartyCrudService
 } from '@core/api/territorial-crud.services';
 import { getEntityConfig } from '@core/config/entity-config';
 import { DataTableAction, DataTableActionEvent } from '@shared/components/data-table/data-table.component';
@@ -15,10 +16,10 @@ import { DataTableAction, DataTableActionEvent } from '@shared/components/data-t
  *
  * Orquesta la pantalla de funcionarios:
  *   - Carga las entidades disponibles para el select dinámico (id_entity).
- *   - La protección de borrado por dependencias la maneja el propio backend:
- *     si hay FK violation devuelve HTTP 400 y el interceptor lo muestra en el toast.
- *     El modelo Annotation no expone id_official, así que no hay dependencyChecks
- *     para verificar en frontend.
+ *   - CU-02 E3: Validación de dependencias antes de eliminar.
+ *     El modelo Annotation no tiene id_official directo, pero se verifica si la entidad
+ *     del funcionario tiene anotaciones asociadas vía InterestedParty (dependencyCheck).
+ *     Si hay dependencias, el sistema muestra un diálogo con los detalles y bloquea la eliminación.
  */
 @Component({
   selector: 'app-officials-list-generic',
@@ -44,6 +45,7 @@ import { DataTableAction, DataTableActionEvent } from '@shared/components/data-t
       [hiddenFields]="hiddenFields()"
       [extraTableActions]="officialActions"
       [autoRefreshMs]="15000"
+      [dependencyCheckServices]="dependencyCheckServices"
       (tableAction)="onOfficialAction($event)"
     ></app-generic-crud-list>
   `,
@@ -82,6 +84,7 @@ export class OfficialsListGenericComponent implements OnInit, AfterViewInit {
 
   readonly crudService = inject(OfficialCrudService);
   private readonly entityService = inject(EntityCrudService);
+  private readonly interestedPartyService = inject(InterestedPartyCrudService);
   private readonly route = inject(ActivatedRoute);
  
   readonly config = getEntityConfig('officials');
@@ -93,6 +96,9 @@ export class OfficialsListGenericComponent implements OnInit, AfterViewInit {
     return entityId ? { id_entity: entityId } : {};
   });
   readonly hiddenFields = computed(() => this.selectedEntityId() ? ['id_entity'] : []);
+  readonly dependencyCheckServices = {
+    InterestedPartyCrudService: this.interestedPartyService
+  };
   readonly officialActions: DataTableAction<any>[] = [
     { id: 'view', label: 'Visualizar funcionario', icon: 'eye-outline' }
   ];

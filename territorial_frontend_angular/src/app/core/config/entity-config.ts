@@ -193,10 +193,17 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
     // es por "email", no por "name". Si el email ya existe el backend responde
     // HTTP 400 y generic-crud-form.ts ya muestra el mensaje en el banner (FIX 2 del form).
     skipDuplicateCheck: true,
-    // NOTA CU-02 E3 (eliminar): El modelo Annotation del backend NO tiene campo id_official,
-    // por lo que no es posible verificar dependencias vía search antes de eliminar.
-    // El propio backend bloquea el DELETE con HTTP 400 si hay una FK violation en BD
-    // y el interceptor muestra ese mensaje en el toast. No se define dependencyChecks aquí.
+    // CU-02 E3 (eliminar): Validación de dependencias antes de eliminar funcionario.
+    // Aunque Annotation no tiene id_official directo, se debe verificar si la entidad
+    // del funcionario tiene anotaciones asociadas vía InterestedParty.
+    dependencyChecks: [
+      {
+        service: 'InterestedPartyCrudService',
+        endpoint: 'interested-parties',
+        paramField: 'id_entity',
+        warningMessage: 'Existen anotaciones asociadas a la entidad de este funcionario'
+      }
+    ],
     columns: [
       { key: 'name', header: 'Nombre' },
       { key: 'email', header: 'Correo' },
