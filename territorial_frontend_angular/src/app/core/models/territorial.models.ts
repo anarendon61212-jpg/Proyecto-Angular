@@ -99,6 +99,7 @@ export interface Neighborhood {
   id_neighborhood: number;
   id_commune: number;
   name: string;
+  commune_name?: string | null;
   status: TerritorialStatus;
   created_at?: IsoDateString | null;
   updated_at?: IsoDateString | null;

@@ -172,13 +172,23 @@ export class NeighborhoodsListGenericComponent implements OnInit {
   private loadItems(): void {
     this.crudService.listCollection().pipe(take(1)).subscribe({
       next: (collection: any) => {
-        this.collection.set(collection);
+        // Agregar nombre de la comuna a cada barrio
+        const itemsWithCommuneName = collection.items.map((neighborhood: Neighborhood) => ({
+          ...neighborhood,
+          commune_name: this.getCommuneName(neighborhood.id_commune)
+        }));
+        this.collection.set({ ...collection, items: itemsWithCommuneName });
       },
       error: (error: any) => {
         console.error('[NeighborhoodsList] Error loading items:', error);
         this.toastService.danger('Error', 'No se pudieron cargar los barrios');
       }
     });
+  }
+
+  private getCommuneName(idCommune: number): string {
+    const commune = this.communes.find(c => c.id_commune === idCommune);
+    return commune ? commune.name : '—';
   }
 
   openCreateForm(): void {

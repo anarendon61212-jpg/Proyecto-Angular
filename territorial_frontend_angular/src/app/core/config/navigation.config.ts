@@ -46,7 +46,7 @@ export const MAIN_NAVIGATION: NavigationItem[] = [
     icon: '▦',
     route: '/territorios/barrios',
     section: 'Gestión territorial',
-    roles: ['Administrador', 'Funcionario']
+    roles: ['Administrador']
   },
   {
     label: 'Demarcación',
