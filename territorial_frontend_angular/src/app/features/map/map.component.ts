@@ -39,6 +39,7 @@ import {
 import { ApiClient } from '../../core/api/api-client.service';
 import { ToastService } from '../../shared/services/toast.service';
 import { TrackingService } from '../../core/services/tracking.service';
+import { AuthService } from '../../core/auth/auth.service';
 import { AnnotationDetailPanelComponent, AnnotationDetailPanelData } from './components/annotation-detail-panel.component';
 
 interface NeighborhoodShape {
@@ -323,7 +324,7 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
             </button>
           </div>
 
-          <div class="panel-section">
+          <div class="panel-section" *ngIf="authService.hasAnyRole(['Funcionario'])">
             <h3>Demarcación de barrio</h3>
             <p *ngIf="!isEditingPolygon">Seleccione un barrio y haga clic para demarcar sus límites.</p>
             <p *ngIf="isEditingPolygon" style="color: var(--color-danger);">Haga clic en el mapa para agregar puntos. Clic derecho en un punto para eliminarlo. Mínimo 3 puntos.</p>
@@ -602,6 +603,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly ngZone = inject(NgZone);
   private readonly changeDetectorRef = inject(ChangeDetectorRef);
+  readonly authService = inject(AuthService);
 
   private readonly destroy$ = new Subject<void>();
 
@@ -920,6 +922,12 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   // ── Polygon editing ───────────────────────────────────────────────────────
 
   startPolygonEditing(): void {
+    // CU-09: Solo los funcionarios pueden demarcar puntos de un barrio
+    if (!this.authService.hasAnyRole(['Funcionario'])) {
+      this.toastService.warning('Acceso denegado', 'Solo los funcionarios pueden demarcar barrios');
+      return;
+    }
+
     if (this.isAnnotationMode) this.toggleAnnotationMode();
     if (this.selectedNeighborhoodId == null) {
       alert('Por favor seleccione un barrio primero');
@@ -939,6 +947,12 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   }
 
   startExistingPolygonEditing(): void {
+    // CU-09: Solo los funcionarios pueden demarcar puntos de un barrio
+    if (!this.authService.hasAnyRole(['Funcionario'])) {
+      this.toastService.warning('Acceso denegado', 'Solo los funcionarios pueden demarcar barrios');
+      return;
+    }
+
     if (this.isAnnotationMode) this.toggleAnnotationMode();
     if (this.selectedNeighborhoodId == null) {
       alert('Por favor seleccione un barrio primero');

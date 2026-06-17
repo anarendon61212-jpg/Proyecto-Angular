@@ -49,13 +49,6 @@ export const MAIN_NAVIGATION: NavigationItem[] = [
     roles: ['Administrador']
   },
   {
-    label: 'Demarcación',
-    icon: '⌖',
-    route: '/territorios/demarcacion',
-    section: 'Gestión territorial',
-    roles: ['Administrador', 'Funcionario']
-  },
-  {
     label: 'Entidades',
     icon: '▥',
     route: '/admin/entidades',
