@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, ViewChild, inject } from '@angular/core';
 import { Router } from '@angular/router';
 
 import { GenericCrudListComponent } from '@shared/components/generic-crud-list/generic-crud-list.component';
@@ -12,6 +12,7 @@ import { DataTableActionEvent } from '@shared/components/data-table/data-table.c
   imports: [GenericCrudListComponent],
   template: `
     <app-generic-crud-list
+      #crudList
       [config]="config"
       [crudService]="crudService"
       [dependencyCheckService]="dependencyCheckService"
@@ -22,6 +23,7 @@ import { DataTableActionEvent } from '@shared/components/data-table/data-table.c
   `
 })
 export class EntitiesListGenericComponent {
+  @ViewChild(GenericCrudListComponent) private readonly crudList?: GenericCrudListComponent;
   private readonly router = inject(Router);
   readonly crudService = inject(EntityCrudService);
   readonly dependencyCheckService = inject(OfficialCrudService);
@@ -32,10 +34,16 @@ export class EntitiesListGenericComponent {
     InterestedPartyCrudService: this.interestedPartyService
   };
   readonly entityActions = [
-    { id: 'add-official', label: 'Agregar funcionario', icon: '+F' }
+    { id: 'view-entity', label: 'Visualizar entidad', icon: 'eye-outline' },
+    { id: 'add-official', label: 'Agregar funcionario', icon: 'users-outline' }
   ];
 
   onEntityAction(event: DataTableActionEvent<any>): void {
+    if (event.actionId === 'view-entity') {
+      this.crudList?.openEditForm(event.row);
+      return;
+    }
+
     if (event.actionId !== 'add-official') {
       return;
     }

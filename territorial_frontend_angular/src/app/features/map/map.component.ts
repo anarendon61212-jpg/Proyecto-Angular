@@ -1,9 +1,9 @@
 import { CommonModule } from '@angular/common';
-import { AfterViewInit, Component, ElementRef, inject, OnDestroy, ViewChild } from '@angular/core';
+import { AfterViewInit, ChangeDetectorRef, Component, ElementRef, inject, NgZone, OnDestroy, ViewChild } from '@angular/core';
 import { FormControl, FormGroup, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import * as L from 'leaflet';
-import { combineLatest, forkJoin, Observable, of, Subject, Subscription, takeUntil } from 'rxjs';
+import { combineLatest, forkJoin, Observable, of, Subject, Subscription, take, takeUntil } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 
 import {
@@ -40,6 +40,7 @@ import { ApiClient } from '../../core/api/api-client.service';
 import { FileUploadComponent } from '../../shared/components/file-upload/file-upload.component';
 import { ToastService } from '../../shared/services/toast.service';
 import { TrackingService } from '../../core/services/tracking.service';
+import { AnnotationDetailPanelComponent, AnnotationDetailPanelData } from './components/annotation-detail-panel.component';
 
 interface NeighborhoodShape {
   id: number;
@@ -82,6 +83,64 @@ interface EntityGeocodeCacheEntry {
   address: string;
 }
 
+type OfficialConnectionState = 'ONLINE' | 'OFFLINE' | 'LAST_KNOWN_POSITION';
+type TrackingSource = 'rest' | 'socket';
+type MapMode = 'officials' | 'annotations';
+type TrackingDebugSource =
+  | 'socket-update'
+  | 'polling-refresh'
+  | 'refresh-realtime-panel'
+  | 'rebuild-visible-markers'
+  | 'offline-detector'
+  | 'merge-tracking-snapshot:rest'
+  | 'merge-tracking-snapshot:socket';
+
+interface TrackingDebugEvent {
+  ts: string;
+  source: TrackingDebugSource;
+  officialId: number | null;
+  previousState: OfficialConnectionState | 'UNKNOWN';
+  nextState: OfficialConnectionState | 'UNKNOWN';
+  gps_active: boolean | null;
+  lastUpdate: string | null;
+  markerType: 'dot-green' | 'dot-blue' | 'dot-gray' | 'missing-marker' | 'unknown';
+  panelLabel: string | null;
+}
+
+interface AnnotationMarkerConfig {
+  icon: string;
+  color: string;
+  markerType: string;
+}
+
+interface AnnotationMarkerRule {
+  label: string;
+  icon: string;
+  color: string;
+  markerType: string;
+  keywords: string[];
+}
+
+const ANNOTATION_MARKER_RULES: AnnotationMarkerRule[] = [
+  { label: 'Infraestructura', icon: 'cone', color: '#f59e0b', markerType: 'infrastructure', keywords: ['infraestructura', 'road', 'via', 'calle', 'carretera', 'ande'] },
+  { label: 'Movilidad', icon: 'bus', color: '#f59e0b', markerType: 'mobility', keywords: ['movilidad', 'trafico', 'tránsito', 'bus', 'transporte'] },
+  { label: 'Seguridad', icon: 'shield', color: '#f59e0b', markerType: 'security', keywords: ['seguridad', 'alarma', 'alerta', 'delito', 'policia'] },
+  { label: 'Salud', icon: 'cross', color: '#f59e0b', markerType: 'health', keywords: ['salud', 'hospital', 'medic', 'medicina'] },
+  { label: 'Educación', icon: 'book', color: '#f59e0b', markerType: 'education', keywords: ['educacion', 'educación', 'colegio', 'escuela', 'universidad'] },
+  { label: 'Espacio público', icon: 'tree', color: '#f59e0b', markerType: 'public-space', keywords: ['espacio publico', 'espacio público', 'parque'] },
+  { label: 'Medio ambiente', icon: 'leaf', color: '#f59e0b', markerType: 'environment', keywords: ['medio ambiente', 'ambiental', 'residuo', 'basura', 'hoja'] },
+  { label: 'Comercio', icon: 'store', color: '#f59e0b', markerType: 'commerce', keywords: ['comercio', 'tienda', 'negocio', 'venta'] },
+  { label: 'Riesgo', icon: 'alert', color: '#f59e0b', markerType: 'risk', keywords: ['riesgo', 'desliz', 'incendio', 'emergencia'] },
+  { label: 'Ruido', icon: 'sound', color: '#f59e0b', markerType: 'noise', keywords: ['ruido', 'sonido', 'contaminacion auditiva', 'contaminación auditiva'] },
+  { label: 'Alumbrado', icon: 'light', color: '#f59e0b', markerType: 'lighting', keywords: ['alumbrado', 'luz', 'poste', 'iluminacion', 'iluminación'] }
+];
+
+const ANNOTATION_MARKER_FALLBACK: AnnotationMarkerConfig = {
+  icon: 'pin',
+  color: '#f59e0b',
+  markerType: 'other'
+};
+
 const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
   {
     id: 1,
@@ -118,75 +177,42 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
 @Component({
   selector: 'app-map',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, FileUploadComponent],
+  imports: [CommonModule, FormsModule, ReactiveFormsModule, FileUploadComponent, AnnotationDetailPanelComponent],
   template: `
-    <div class="map-page">
-      <aside class="map-sidebar app-card">
-        <div class="panel-section">
-          <h2>Territorio</h2>
-          <p>Seleccione barrio, capas y filtros para ver datos en el mapa.</p>
+    <section class="rt-shell app-card">
+      <header class="rt-header">
+        <div>
+          <h2>
+            Mapa territorial
+            <span class="rt-live-pill" *ngIf="currentMapMode === 'officials'">En vivo</span>
+          </h2>
+          <p *ngIf="currentMapMode === 'officials'">Visualiza la ubicación actual de los funcionarios activos.</p>
+          <p *ngIf="currentMapMode === 'annotations'">Gestiona territorio, capas y anotaciones sin salir del mapa.</p>
         </div>
+      </header>
 
-        <div class="panel-section">
-          <label for="neighborhood-select">Barrio</label>
-          <select id="neighborhood-select" [value]="selectedNeighborhoodId ?? ''" (change)="onNeighborhoodSelected($event)">
-            <option value="">Todos los barrios</option>
-            <option *ngFor="let neighborhood of neighborhoods" [value]="neighborhood.id_neighborhood">
-              {{ neighborhood.name }}
-            </option>
-          </select>
-        </div>
+      <nav class="map-mode-switcher" aria-label="Modo del mapa">
+        <button
+          type="button"
+          class="mode-tab"
+          [class.mode-tab--active]="currentMapMode === 'officials'"
+          (click)="setMapMode('officials')"
+        >
+          Funcionarios
+        </button>
+        <button
+          type="button"
+          class="mode-tab"
+          [class.mode-tab--active]="currentMapMode === 'annotations'"
+          (click)="setMapMode('annotations')"
+        >
+          Anotaciones
+        </button>
+      </nav>
 
-        <div class="panel-section">
-          <h3>Capas</h3>
-          <label><input type="checkbox" [checked]="showNeighborhoods" (change)="toggleNeighborhoodLayer($event.target.checked)" /> Mostrar polígonos</label>
-          <label><input type="checkbox" [checked]="showPoints" (change)="togglePointsLayer($event.target.checked)" /> Mostrar puntos</label>
-        </div>
-
-        <div class="panel-section">
-          <h3>Tipo de punto</h3>
-          <label><input type="checkbox" [checked]="pointFilters.annotation" (change)="togglePointType('annotation', $event.target.checked)" /> Anotaciones</label>
-          <label><input type="checkbox" [checked]="pointFilters.polygon" (change)="togglePointType('polygon', $event.target.checked)" /> Polígonos</label>
-          <label><input type="checkbox" [checked]="pointFilters.boundary" (change)="togglePointType('boundary', $event.target.checked)" /> Linderos</label>
-        </div>
-
-        <div class="panel-section">
-          <h3>Categorías</h3>
-          <div class="category-filters-header">
-            <button
-              type="button"
-              class="app-button app-button--secondary app-button--small"
-              [disabled]="selectedFilterCategoryIds.size === 0"
-              (click)="clearCategoryFilters()"
-            >
-              Limpiar filtros
-            </button>
-          </div>
-          <p class="category-filter-hint" *ngIf="selectedFilterCategoryIds.size > 0">
-            Selección múltiple activa (OR): se muestran anotaciones de cualquiera de las categorías seleccionadas o sus descendientes.
-          </p>
-          <div class="category-tree" *ngIf="categoryFilterTree.length > 0; else noCategoriesTemplate">
-            <ng-container *ngFor="let root of categoryFilterTree">
-              <ng-container *ngTemplateOutlet="categoryNodeTemplate; context: { $implicit: root, level: 0 }"></ng-container>
-            </ng-container>
-          </div>
-          <ng-template #noCategoriesTemplate>
-            <p class="map-info-message">No hay categorías disponibles para filtrar.</p>
-          </ng-template>
-
-        </div>
-
-        <div class="panel-section">
-          <h3>Funcionarios en tiempo real</h3>
-          <label>
-            <input
-              type="checkbox"
-              [checked]="showRealtimeOfficials"
-              (change)="toggleRealtimeOfficials($event.target.checked)"
-            />
-            Mostrar funcionarios en tiempo real
-          </label>
-          <label for="entity-filter-select">Entidad</label>
+      <div class="rt-toolbar" *ngIf="currentMapMode === 'officials'">
+        <div class="rt-filter">
+          <label for="entity-filter-select">Filtrar por entidad</label>
           <select id="entity-filter-select" [value]="selectedEntityFilter ?? ''" (change)="onEntityFilterSelected($event)">
             <option value="">Todas las entidades</option>
             <option *ngFor="let entity of trackingEntities" [value]="entity.id_entity">
@@ -195,70 +221,212 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
           </select>
         </div>
 
-        <div class="panel-section">
-          <h3>Anotaciones</h3>
-          <p *ngIf="!isAnnotationMode && !selectedAnnotationLocation">
-            Active el modo para crear una anotación desde el mapa.
-          </p>
-          <p *ngIf="isAnnotationMode" class="annotation-mode-hint">
-            Seleccione un barrio demarcado en el mapa para crear una anotación.
-          </p>
-          <button
-            type="button"
-            class="app-button"
-            [class.app-button--primary]="!isAnnotationMode"
-            [class.app-button--danger]="isAnnotationMode"
-            (click)="toggleAnnotationMode()"
-          >
-            {{ isAnnotationMode ? 'Cancelar modo anotación' : 'Crear anotación' }}
+        <div class="rt-stats">
+          <div class="rt-stat-card">
+            <small>Funcionarios activos</small>
+            <strong>{{ getRealtimeActiveCount() }}</strong>
+          </div>
+          <div class="rt-stat-card">
+            <small>Sin conexión</small>
+            <strong>{{ getRealtimeOfflineCount() }}</strong>
+          </div>
+          <div class="rt-stat-card">
+            <small>Total</small>
+            <strong>{{ getRealtimeTotalCount() }}</strong>
+          </div>
+        </div>
+
+        <div class="rt-actions">
+          <span>Última actualización: {{ getLatestRealtimeUpdateLabel() }}</span>
+          <button type="button" class="app-button app-button--secondary" (click)="refreshRealtimePanel()">
+            Actualizar
           </button>
-
         </div>
+      </div>
 
-        <div class="panel-section">
-          <h3>Demarcación de barrio</h3>
-          <p *ngIf="!isEditingPolygon">Seleccione un barrio y haga clic para demarcar sus límites.</p>
-          <p *ngIf="isEditingPolygon" style="color: var(--color-danger);">Haga clic en el mapa para agregar puntos. Clic derecho en un punto para eliminarlo. Mínimo 3 puntos.</p>
-          <button type="button" class="app-button app-button--primary" *ngIf="!isEditingPolygon" (click)="startPolygonEditing()">Demarcar barrio</button>
-          <button type="button" class="app-button app-button--secondary" *ngIf="!isEditingPolygon" (click)="startExistingPolygonEditing()">Editar polígono</button>
-          <button type="button" class="app-button app-button--secondary" *ngIf="isEditingPolygon" (click)="savePolygon()">Guardar polígono</button>
-          <button type="button" class="app-button app-button--danger" *ngIf="isEditingPolygon" (click)="cancelPolygonEditing()">Cancelar</button>
-        </div>
+      <div
+        class="rt-main"
+        [class.rt-main--annotations]="currentMapMode === 'annotations'"
+        [class.rt-main--annotations-with-detail]="currentMapMode === 'annotations' && selectedAnnotationDetail"
+      >
+        <aside class="map-sidebar map-sidebar--annotations app-card" *ngIf="currentMapMode === 'annotations'">
+          <h3 class="map-sidebar__title">Herramientas avanzadas del mapa</h3>
 
-        <div class="panel-section">
-          <h3>Mapa</h3>
-          <button type="button" class="app-button app-button--secondary" (click)="setBaseLayer('streets')">Calles</button>
-          <button type="button" class="app-button app-button--secondary" (click)="setBaseLayer('topographic')">Topográfico</button>
-        </div>
-      </aside>
-
-      <section class="map-view app-card">
-        <div class="map-header">
-          <div>
-            <strong>Mapa territorial</strong>
-            <p>Explora barrios, polígonos y puntos geoespaciales.</p>
+          <div class="panel-section">
+            <h3>Territorio</h3>
+            <p>Seleccione barrio, capas y filtros para ver datos en el mapa.</p>
           </div>
-          <div class="map-legend">
-            <span class="legend-item legend-item--neighborhood">Polígonos</span>
-            <span class="legend-item legend-item--point">Puntos editables</span>
-            <span class="legend-item legend-item--entity">Entidades</span>
-            <span class="legend-item legend-item--annotation" *ngIf="isAnnotationMode">Modo anotación activo</span>
+
+          <div class="panel-section">
+            <label for="neighborhood-select">Barrio</label>
+            <select id="neighborhood-select" [value]="selectedNeighborhoodId ?? ''" (change)="onNeighborhoodSelected($event)">
+              <option value="">Todos los barrios</option>
+              <option *ngFor="let neighborhood of neighborhoods" [value]="neighborhood.id_neighborhood">
+                {{ neighborhood.name }}
+              </option>
+            </select>
           </div>
-        </div>
 
-        <p class="map-info-message" *ngIf="showPoints && pointFilters.annotation && !hasAnnotationPoints">
-          No existen anotaciones registradas.
-        </p>
-        <p class="map-info-message" *ngIf="showPoints && pointFilters.annotation && hasAnnotationPoints && visibleAnnotationCount === 0">
-          No hay anotaciones para los filtros seleccionados.
-        </p>
-        <p class="map-info-message" *ngIf="showNoOfficialsForSelectedEntity">
-          No hay funcionarios activos en la entidad filtrada.
-        </p>
+          <div class="panel-section">
+            <h3>Capas</h3>
+            <label><input type="checkbox" [checked]="showNeighborhoods" (change)="toggleNeighborhoodLayer($event.target.checked)" /> Mostrar polígonos</label>
+            <label><input type="checkbox" [checked]="showPoints" (change)="togglePointsLayer($event.target.checked)" /> Mostrar puntos</label>
+          </div>
 
-        <div #mapContainer class="leaflet-container" [class.annotation-cursor]="isAnnotationMode"></div>
-      </section>
-    </div>
+          <div class="panel-section">
+            <h3>Tipo de punto</h3>
+            <label><input type="checkbox" [checked]="pointFilters.annotation" (change)="togglePointType('annotation', $event.target.checked)" /> Anotaciones</label>
+            <label><input type="checkbox" [checked]="pointFilters.polygon" (change)="togglePointType('polygon', $event.target.checked)" /> Polígonos</label>
+            <label><input type="checkbox" [checked]="pointFilters.boundary" (change)="togglePointType('boundary', $event.target.checked)" /> Linderos</label>
+          </div>
+
+          <div class="panel-section">
+            <h3>Categorías</h3>
+            <div class="category-filters-header">
+              <button
+                type="button"
+                class="app-button app-button--secondary app-button--small"
+                [disabled]="selectedFilterCategoryIds.size === 0"
+                (click)="clearCategoryFilters()"
+              >
+                Limpiar filtros
+              </button>
+            </div>
+            <p class="category-filter-hint" *ngIf="selectedFilterCategoryIds.size > 0">
+              Selección múltiple activa (OR): se muestran anotaciones de cualquiera de las categorías seleccionadas o sus descendientes.
+            </p>
+            <div class="category-tree" *ngIf="categoryFilterTree.length > 0; else noCategoriesTemplate">
+              <ng-container *ngFor="let root of categoryFilterTree">
+                <ng-container *ngTemplateOutlet="categoryNodeTemplate; context: { $implicit: root, level: 0 }"></ng-container>
+              </ng-container>
+            </div>
+            <ng-template #noCategoriesTemplate>
+              <p class="map-info-message">No hay categorías disponibles para filtrar.</p>
+            </ng-template>
+          </div>
+
+          <div class="panel-section">
+            <h3>Anotaciones</h3>
+            <p *ngIf="!isAnnotationMode && !selectedAnnotationLocation">
+              Active el modo para crear una anotación desde el mapa.
+            </p>
+            <p *ngIf="isAnnotationMode" class="annotation-mode-hint">
+              Seleccione un barrio demarcado en el mapa para crear una anotación.
+            </p>
+            <button
+              type="button"
+              class="app-button"
+              [class.app-button--primary]="!isAnnotationMode"
+              [class.app-button--danger]="isAnnotationMode"
+              (click)="toggleAnnotationMode()"
+            >
+              {{ isAnnotationMode ? 'Cancelar modo anotación' : 'Crear anotación' }}
+            </button>
+          </div>
+
+          <div class="panel-section">
+            <h3>Demarcación de barrio</h3>
+            <p *ngIf="!isEditingPolygon">Seleccione un barrio y haga clic para demarcar sus límites.</p>
+            <p *ngIf="isEditingPolygon" style="color: var(--color-danger);">Haga clic en el mapa para agregar puntos. Clic derecho en un punto para eliminarlo. Mínimo 3 puntos.</p>
+            <button type="button" class="app-button app-button--primary" *ngIf="!isEditingPolygon" (click)="startPolygonEditing()">Demarcar barrio</button>
+            <button type="button" class="app-button app-button--secondary" *ngIf="!isEditingPolygon" (click)="startExistingPolygonEditing()">Editar polígono</button>
+            <button type="button" class="app-button app-button--secondary" *ngIf="isEditingPolygon" (click)="savePolygon()">Guardar polígono</button>
+            <button type="button" class="app-button app-button--danger" *ngIf="isEditingPolygon" (click)="cancelPolygonEditing()">Cancelar</button>
+          </div>
+
+          <div class="panel-section">
+            <h3>Mapa base</h3>
+            <div class="base-layer-switch">
+              <button
+                type="button"
+                class="app-button app-button--secondary app-button--small"
+                [class.map-base-active]="currentBaseLayer === 'streets'"
+                (click)="setBaseLayer('streets')"
+              >
+                Calles
+              </button>
+              <button
+                type="button"
+                class="app-button app-button--secondary app-button--small"
+                [class.map-base-active]="currentBaseLayer === 'topographic'"
+                (click)="setBaseLayer('topographic')"
+              >
+                Topográfico
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <section class="map-view">
+          <div class="map-view__header">
+            <div class="map-view__title">
+              Mapa | {{ currentMapMode === 'officials' ? 'Funcionarios' : 'Anotaciones' }}
+            </div>
+            <div class="map-legend" aria-label="Convenciones del mapa">
+              <div class="legend-item legend-item--entity">
+                <span class="legend-dot legend-dot--entity"></span>
+                <span>Entidad</span>
+              </div>
+              <div class="legend-item legend-item--annotation">
+                <span class="legend-dot legend-dot--annotation"></span>
+                <span>Anotación</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="map-floating-legend" *ngIf="currentMapMode === 'officials'">
+            <h4>Convenciones</h4>
+            <p><span class="dot dot--active"></span> En línea</p>
+            <p><span class="dot dot--offline"></span> Sin conexión</p>
+            <p><span class="dot dot--known"></span> Última posición conocida</p>
+          </div>
+
+          <p class="map-info-message" *ngIf="currentMapMode === 'officials' && showNoOfficialsForSelectedEntity">
+            No hay funcionarios activos en la entidad filtrada.
+          </p>
+          <div #mapContainer class="leaflet-container" [class.annotation-cursor]="isAnnotationMode"></div>
+        </section>
+
+        <app-annotation-detail-panel
+          *ngIf="currentMapMode === 'annotations'"
+          [visible]="selectedAnnotationDetail != null"
+          [selectedAnnotation]="selectedAnnotationDetail"
+          [imageUrlResolver]="resolveEvidenceImageUrl"
+          (closePanel)="closeAnnotationDetailPanel()"
+        />
+
+        <aside class="rt-side app-card" *ngIf="currentMapMode === 'officials'">
+          <div class="rt-side__header">
+            <h3>Funcionarios ({{ getRealtimeTotalCount() }})</h3>
+            <input
+              type="search"
+              [(ngModel)]="officialRealtimeSearch"
+              placeholder="Buscar funcionario..."
+              aria-label="Buscar funcionario"
+            />
+          </div>
+
+          <div class="rt-list">
+            <article class="rt-item" *ngFor="let item of getRealtimePanelItems(); trackBy: trackRealtimeOfficial">
+              <div class="rt-avatar">{{ getOfficialInitials(item.id_official) }}</div>
+              <div class="rt-item__info">
+                <strong>{{ getOfficialDisplayName(item.id_official) }}</strong>
+                <small
+                  [class.offline]="isOfficialPanelOffline(item)"
+                  [class.known]="isOfficialPanelLastKnown(item)"
+                >
+                  {{ getOfficialPanelConnectionLabel(item) }}
+                </small>
+              </div>
+              <div class="rt-item__meta">
+                <small>{{ formatRealtimeTime(item.lastUpdate ?? item.last_gps_update) }}</small>
+                <small>{{ formatRealtimeLocation(item.latitude, item.longitude) }}</small>
+              </div>
+            </article>
+          </div>
+        </aside>
+      </div>
+    </section>
 
     <ng-template #categoryNodeTemplate let-node let-level="level">
       <div class="category-tree-node" [style.padding-left.px]="level * 14">
@@ -291,11 +459,33 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
 
   `,
   styles: [
-    `.map-page { display: grid; grid-template-columns: 320px 1fr; gap: 1rem; margin: 0; padding: 0; }`,
+    `.rt-shell { display: grid; gap: 1rem; padding: 1rem; }`,
+    `.rt-header h2 { margin: 0; font-size: 1.45rem; display: inline-flex; align-items: center; gap: 0.6rem; }`,
+    `.rt-header p { margin: 0.25rem 0 0; color: var(--color-muted); font-size: 0.88rem; }`,
+    `.rt-live-pill { background: #dcfce7; color: #15803d; border-radius: 999px; font-size: 0.72rem; font-weight: 800; padding: 0.25rem 0.55rem; }`,
+    `.map-mode-switcher { display: inline-flex; align-items: center; gap: 0.45rem; background: #f8fafc; border: 1px solid var(--color-border); border-radius: 999px; padding: 0.35rem; width: fit-content; }`,
+    `.mode-tab { border: none; background: transparent; color: #475569; font-weight: 700; font-size: 0.82rem; border-radius: 999px; padding: 0.45rem 0.9rem; cursor: pointer; }`,
+    `.mode-tab--active { background: #2563eb; color: #fff; box-shadow: 0 8px 18px rgba(37, 99, 235, 0.25); }`,
+    `.rt-toolbar { display: grid; grid-template-columns: minmax(220px, 280px) 1fr auto; gap: 0.75rem; align-items: stretch; }`,
+    `.rt-filter { border: 1px solid var(--color-border); border-radius: 12px; padding: 0.7rem; background: #fff; display: grid; gap: 0.35rem; }`,
+    `.rt-filter label { font-size: 0.75rem; color: var(--color-muted); font-weight: 700; }`,
+    `.rt-stats { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 0.65rem; }`,
+    `.rt-stat-card { border: 1px solid var(--color-border); border-radius: 12px; background: #fff; padding: 0.65rem 0.75rem; display: grid; gap: 0.2rem; }`,
+    `.rt-stat-card small { color: var(--color-muted); font-size: 0.74rem; }`,
+    `.rt-stat-card strong { font-size: 1.2rem; line-height: 1; }`,
+    `.rt-actions { border: 1px solid var(--color-border); border-radius: 12px; background: #fff; padding: 0.65rem 0.75rem; display: flex; align-items: center; gap: 0.6rem; color: var(--color-muted); font-size: 0.78rem; }`,
+    `.rt-main { display: grid; grid-template-columns: 1fr 330px; gap: 0.8rem; min-height: 690px; }`,
+    `.rt-main--annotations { grid-template-columns: 320px 1fr; }`,
+    `.rt-main--annotations-with-detail { grid-template-columns: 320px minmax(0, 1fr) 360px; }`,
     `.map-sidebar { display: grid; gap: 1rem; padding: 1.25rem; }`,
+    `.map-sidebar--annotations { max-height: 690px; overflow-y: auto; align-content: start; }`,
+    `.map-sidebar__title { margin: 0; padding-bottom: 0.75rem; border-bottom: 1px solid var(--color-border); font-size: 1rem; }`,
     `.panel-section { display: grid; gap: 0.75rem; }`,
     `.panel-section h3 { margin: 0; font-size: 0.95rem; }`,
     `.panel-section label { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; color: var(--color-ink); }`,
+    `.panel-section p { margin: 0; color: #64748b; font-size: 0.84rem; line-height: 1.35; }`,
+    `.base-layer-switch { display: flex; flex-wrap: wrap; gap: 0.45rem; }`,
+    `.map-base-active { background: #2563eb !important; color: #fff !important; border-color: #2563eb !important; }`,
     `.category-filters-header { display: flex; justify-content: flex-end; }`,
     `.category-filter-hint { margin: 0; color: var(--color-ink-muted, #6b7280); font-size: 0.82rem; line-height: 1.35; }`,
     `.category-tree { border: 1px solid var(--color-border); border-radius: 0.875rem; padding: 0.6rem; background: #fff; max-height: 260px; overflow-y: auto; display: grid; gap: 0.25rem; }`,
@@ -306,15 +496,36 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     `.category-count { font-size: 0.78rem; color: var(--color-ink-muted, #6b7280); margin-left: auto; }`,
     `.map-info-message { margin: 0; color: var(--color-ink-muted, #6b7280); font-size: 0.9rem; }`,
     `select { width: 100%; border: 1px solid var(--color-border); border-radius: 12px; background: white; color: var(--color-ink); font: inherit; padding: 0.8rem 0.85rem; }`,
-    `.map-view { display: grid; gap: 1rem; min-height: calc(100vh - 3rem); padding: 1.25rem; }`,
-    `.map-header { align-items: center; display: flex; justify-content: space-between; gap: 1rem; }`,
-    `.map-legend { display: flex; gap: 0.75rem; flex-wrap: wrap; }`,
-    `.legend-item { align-items: center; border-radius: 999px; display: inline-flex; gap: 0.5rem; font-size: 0.9rem; padding: 0.6rem 0.85rem; }`,
-    `.legend-item--neighborhood { background: rgba(20, 89, 245, 0.1); color: var(--color-primary); }`,
-    `.legend-item--point { background: rgba(239, 35, 60, 0.1); color: var(--color-danger); }`,
-    `.legend-item--entity { background: rgba(22, 163, 74, 0.12); color: #15803d; }`,
-    `.legend-item--annotation { background: rgba(255, 165, 0, 0.15); color: #b45309; font-weight: 600; }`,
-    `.leaflet-container { min-height: 640px; width: 100%; border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }`,
+    `.map-view { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: #fff; overflow: hidden; position: relative; display: grid; grid-template-rows: auto 1fr; }`,
+    `.map-view__header { border-bottom: 1px solid #e2e8f0; background: #f8fafc; padding: 0.55rem 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }`,
+    `.map-view__title { font-size: 0.84rem; font-weight: 800; color: #334155; }`,
+    `.map-legend { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }`,
+    `.legend-item { display: inline-flex; align-items: center; gap: 0.4rem; border: 1px solid #dbe3ef; background: #fff; border-radius: 999px; padding: 0.25rem 0.6rem; font-size: 0.77rem; color: #334155; }`,
+    `.legend-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }`,
+    `.legend-dot--entity { background: #22c55e; }`,
+    `.legend-dot--annotation { background: #f59e0b; }`,
+    `.map-floating-legend { position: absolute; right: 12px; top: 12px; z-index: 700; border: 1px solid var(--color-border); background: rgba(255,255,255,0.97); border-radius: 12px; padding: 0.6rem 0.7rem; box-shadow: 0 8px 18px rgba(15,35,95,0.08); max-width: 220px; }`,
+    `.map-floating-legend h4 { margin: 0 0 0.35rem; font-size: 0.8rem; }`,
+    `.map-floating-legend p { margin: 0.2rem 0; color: #334155; font-size: 0.76rem; display: flex; align-items: center; gap: 0.35rem; }`,
+    `.dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }`,
+    `.dot--active { background: #22c55e; }`,
+    `.dot--offline { background: #94a3b8; }`,
+    `.dot--known { background: #2563eb; }`,
+    `.leaflet-container { min-height: 690px; width: 100%; border-radius: 0; box-shadow: none; }`,
+    `.rt-side { display: grid; grid-template-rows: auto 1fr; padding: 0; overflow: hidden; }`,
+    `.rt-side__header { padding: 0.85rem; border-bottom: 1px solid var(--color-border); display: grid; gap: 0.45rem; }`,
+    `.rt-side__header h3 { margin: 0; font-size: 0.95rem; }`,
+    `.rt-side__header input { border: 1px solid var(--color-border); border-radius: 10px; padding: 0.65rem 0.75rem; }`,
+    `.rt-list { overflow: auto; max-height: 620px; }`,
+    `.rt-item { display: grid; grid-template-columns: 38px 1fr auto; gap: 0.55rem; align-items: center; padding: 0.7rem 0.8rem; border-bottom: 1px solid #eef2f7; }`,
+    `.rt-avatar { width: 38px; height: 38px; border-radius: 999px; background: linear-gradient(145deg, #e0ecff, #c7dcff); color: #1e40af; display: inline-flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 800; }`,
+    `.rt-item__info { display: grid; }`,
+    `.rt-item__info strong { font-size: 0.84rem; }`,
+    `.rt-item__info small { font-size: 0.73rem; color: #16a34a; }`,
+    `.rt-item__info small.offline { color: #64748b; }`,
+    `.rt-item__info small.known { color: #2563eb; }`,
+    `.rt-item__meta { display: grid; text-align: right; }`,
+    `.rt-item__meta small { font-size: 0.72rem; color: #64748b; }`,
     `.map-point-marker { width: 16px; height: 16px; border: 2px solid #ffffff; border-radius: 50%; background: var(--color-danger); box-shadow: 0 0 0 5px rgba(239, 35, 60, 0.16); }`,
     `.map-annotation-marker { width: 20px; height: 20px; border: 2px solid #fff; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 5px rgba(245, 158, 11, 0.25); }`,
     `.official-marker {
@@ -348,7 +559,8 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     }`,
     `.annotation-cursor, .annotation-cursor .leaflet-interactive { cursor: crosshair !important; }`,
     `.annotation-mode-hint { color: var(--color-primary); font-weight: 500; }`,
-    `@media (max-width: 980px) { .map-page { grid-template-columns: 1fr; } }`,
+    `@media (max-width: 1240px) { .rt-toolbar { grid-template-columns: 1fr; } .rt-main { grid-template-columns: 1fr; } .rt-main--annotations { grid-template-columns: 1fr; } .rt-main--annotations-with-detail { grid-template-columns: 1fr; } .rt-stats { grid-template-columns: repeat(3, 1fr); } .map-floating-legend { left: 12px; right: auto; bottom: 12px; top: auto; } }`,
+    `@media (max-width: 980px) { .map-sidebar--annotations { max-height: none; } }`,
 
     `.ann-form { display: grid; gap: 1rem; padding: 1.25rem 1.5rem 1.5rem; }`,
     `.ann-form--sidebar { padding: 0; margin-top: 0.25rem; }`,
@@ -389,6 +601,8 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private readonly trackingService = inject(TrackingService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
+  private readonly ngZone = inject(NgZone);
+  private readonly changeDetectorRef = inject(ChangeDetectorRef);
 
   private readonly destroy$ = new Subject<void>();
 
@@ -415,6 +629,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private trackingLayer = L.layerGroup();
   private officialsById = new Map<number, Official>();
   private officialMarkers = new Map<number, L.Marker>();
+  private officialConnectionStateById = new Map<number, OfficialConnectionState>();
   private latestTrackingByOfficial = new Map<number, OfficialTrackingSnapshot>();
   private readonly entityGeocodeStorageKey = 'territorial.map.entityGeocodes.v1';
   private readonly realtimeOfficialsToggleStorageKey = 'territorial.map.showRealtimeOfficials';
@@ -428,6 +643,8 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private polygonLine: L.Polyline | null = null;
   private officialsPollingSubscription: Subscription | null = null;
   private officialOfflineIntervalId: ReturnType<typeof setInterval> | null = null;
+  private readonly trackingDebugBuffer: TrackingDebugEvent[] = [];
+  private readonly trackingDebugBufferMaxSize = 50;
   selectedNeighborhoodId: number | null = null;
   private existingPolygonPoints: Point[] = [];
 
@@ -441,9 +658,13 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   annotationCitizens: Citizen[] = [];
   annotationPhotoFiles: File[] = [];
   trackingEntities: Entity[] = [];
+  currentMapMode: MapMode = 'officials';
+  currentBaseLayer: 'streets' | 'topographic' = 'streets';
+  selectedAnnotationDetail: AnnotationDetailPanelData | null = null;
   selectedEntityFilter: number | null = null;
   showRealtimeOfficials = true;
   showNoOfficialsForSelectedEntity = false;
+  officialRealtimeSearch = '';
   categoryFilterTree: CategoryTreeNode[] = [];
   selectedFilterCategoryIds = new Set<number>();
   expandedFilterCategoryIds = new Set<number>();
@@ -512,8 +733,19 @@ export class MapComponent implements AfterViewInit, OnDestroy {
 
   setBaseLayer(layerKey: 'streets' | 'topographic'): void {
     if (!this.map || !this.baseLayers) return;
+    this.currentBaseLayer = layerKey;
     Object.values(this.baseLayers).forEach((layer) => this.map.removeLayer(layer));
     this.baseLayers[layerKey].addTo(this.map);
+  }
+
+  setMapMode(mode: MapMode): void {
+    if (this.currentMapMode === mode) return;
+    this.currentMapMode = mode;
+    if (mode !== 'annotations') {
+      this.selectedAnnotationDetail = null;
+    }
+    this.applyMapModeLayerVisibility();
+    this.triggerRealtimeViewSync();
   }
 
   toggleNeighborhoodLayer(enabled: boolean): void {
@@ -571,9 +803,13 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     if (!enabled) {
       this.trackingLayer.clearLayers();
       this.showNoOfficialsForSelectedEntity = false;
+      this.applyMapModeLayerVisibility();
       return;
     }
-    this.rebuildVisibleTrackingMarkers();
+    this.applyMapModeLayerVisibility();
+    if (this.currentMapMode === 'officials') {
+      this.rebuildVisibleTrackingMarkers();
+    }
   }
 
   onEntityFilterSelected(event: Event): void {
@@ -581,6 +817,96 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     const value = target?.value ?? '';
     this.selectedEntityFilter = value ? Number(value) : null;
     this.rebuildVisibleTrackingMarkers();
+  }
+
+  refreshRealtimePanel(): void {
+    combineLatest([
+      this.officialService.listCollection(),
+      this.entityService.listCollection()
+    ])
+      .pipe(take(1))
+      .subscribe({
+        next: ([officialCollection, entityCollection]) => {
+          this.applyEntityBaseState(entityCollection.items);
+          this.applyOfficialsBaseState(officialCollection.items);
+          this.auditRealtimeSync('refresh-realtime-panel');
+          this.triggerRealtimeViewSync();
+        }
+      });
+  }
+
+  getRealtimeTotalCount(): number {
+    return this.getRealtimeVisibleItemsBase().length;
+  }
+
+  getRealtimeActiveCount(): number {
+    return this.getRealtimeVisibleItemsBase().filter((item) => this.getOfficialConnectionStateForUi(item.id_official) === 'ONLINE').length;
+  }
+
+  getRealtimeOfflineCount(): number {
+    return this.getRealtimeVisibleItemsBase().filter((item) => this.getOfficialConnectionStateForUi(item.id_official) !== 'ONLINE').length;
+  }
+
+  getLatestRealtimeUpdateLabel(): string {
+    let latest = 0;
+    for (const item of this.getRealtimeVisibleItemsBase()) {
+      const ts = item.lastUpdate ?? item.last_gps_update;
+      if (!ts) continue;
+      const ms = new Date(ts).getTime();
+      if (Number.isFinite(ms) && ms > latest) {
+        latest = ms;
+      }
+    }
+    if (!latest) return 'Sin datos';
+    return new Date(latest).toLocaleTimeString();
+  }
+
+  getRealtimePanelItems(): OfficialTrackingSnapshot[] {
+    const all = this.getRealtimeVisibleItemsBase();
+    const query = this.officialRealtimeSearch.trim().toLowerCase();
+
+    return all
+      .filter((item) => {
+        if (!query) return true;
+        const name = this.getOfficialDisplayName(item.id_official).toLowerCase();
+        return name.includes(query);
+      })
+      .sort((a, b) => {
+        const aOnline = this.getOfficialConnectionStateForUi(a.id_official) === 'ONLINE' ? 1 : 0;
+        const bOnline = this.getOfficialConnectionStateForUi(b.id_official) === 'ONLINE' ? 1 : 0;
+        if (aOnline !== bOnline) return bOnline - aOnline;
+        return this.getOfficialDisplayName(a.id_official).localeCompare(this.getOfficialDisplayName(b.id_official));
+      });
+  }
+
+  private getRealtimeVisibleItemsBase(): OfficialTrackingSnapshot[] {
+    return Array.from(this.latestTrackingByOfficial.values())
+      .filter((item) => this.shouldRenderOfficial(item));
+  }
+
+  trackRealtimeOfficial(_: number, item: OfficialTrackingSnapshot): number {
+    return item.id_official;
+  }
+
+  getOfficialDisplayName(idOfficial: number): string {
+    return this.officialsById.get(idOfficial)?.name ?? `Funcionario #${idOfficial}`;
+  }
+
+  getOfficialInitials(idOfficial: number): string {
+    const name = this.getOfficialDisplayName(idOfficial);
+    const parts = name.trim().split(/\s+/).filter(Boolean).slice(0, 2);
+    return parts.map((part) => part.charAt(0).toUpperCase()).join('') || 'FN';
+  }
+
+  formatRealtimeTime(timestamp: string | null | undefined): string {
+    if (!timestamp) return 'Sin hora';
+    const ms = new Date(timestamp).getTime();
+    if (!Number.isFinite(ms)) return 'Sin hora';
+    return new Date(ms).toLocaleTimeString();
+  }
+
+  formatRealtimeLocation(latitude: number, longitude: number): string {
+    return `Lat ${latitude.toFixed(3)} · Lng ${longitude.toFixed(3)}`;
   }
 
   onNeighborhoodSelected(event: Event): void {
@@ -1336,21 +1662,138 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     return false;
   }
 
-  private getAnnotationMarkerStyle(annotationId: number | null | undefined): { background: string; shadow: string } {
-    if (annotationId == null) return this.defaultAnnotationMarkerStyle;
+  private getAnnotationMarkerConfigForAnnotation(annotationId: number | null | undefined): AnnotationMarkerConfig {
+    if (annotationId == null) return ANNOTATION_MARKER_FALLBACK;
     const categoryIds = this.annotationCategoryMap.get(annotationId);
-    if (!categoryIds || categoryIds.size === 0) return this.defaultAnnotationMarkerStyle;
+    if (!categoryIds || categoryIds.size === 0) return ANNOTATION_MARKER_FALLBACK;
 
-    for (const selectedCategory of categoryIds) {
-      let current = this.categoriesById.get(selectedCategory);
-      while (current) {
-        if (current.id_parent_category == null) {
-          return this.categoryColorMap.get(current.id_category) ?? this.defaultAnnotationMarkerStyle;
+    const categories = Array.from(categoryIds)
+      .map((categoryId) => this.categoriesById.get(categoryId))
+      .filter((category): category is Category => category != null);
+    return this.getAnnotationMarkerConfig(categories);
+  }
+
+  private getAnnotationMarkerConfig(categories: Category[]): AnnotationMarkerConfig {
+    const terms = categories
+      .flatMap((category) => {
+        const related = [category.name];
+        if (category.id_parent_category != null) {
+          const parent = this.categoriesById.get(category.id_parent_category);
+          if (parent) related.push(parent.name);
         }
-        current = this.categoriesById.get(current.id_parent_category);
+        return related;
+      })
+      .map((value) => this.normalizeSearchTerm(value));
+
+    for (const rule of ANNOTATION_MARKER_RULES) {
+      const matches = rule.keywords.some((keyword) => terms.some((term) => term.includes(this.normalizeSearchTerm(keyword))));
+      if (matches) {
+        return { icon: rule.icon, color: rule.color, markerType: rule.markerType };
       }
     }
-    return this.defaultAnnotationMarkerStyle;
+    return ANNOTATION_MARKER_FALLBACK;
+  }
+
+  private normalizeSearchTerm(value: string | null | undefined): string {
+    if (!value) return '';
+    return value
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  }
+
+  private getAnnotationMarkerIconSvg(icon: string): string {
+    const common = 'stroke="#ffffff" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"';
+    switch (icon) {
+      case 'cone':
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><path ${common} d="M10 3l4 12H6L10 3z"/><path ${common} d="M8 8h4"/></svg>`;
+      case 'bus':
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><rect x="4" y="4.5" width="12" height="9" rx="2" ${common}/><path ${common} d="M6 8h8"/><circle cx="7" cy="14.5" r="1.2" fill="#fff"/><circle cx="13" cy="14.5" r="1.2" fill="#fff"/></svg>`;
+      case 'shield':
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><path ${common} d="M10 3l5 2v4c0 3.4-2.1 5.8-5 7-2.9-1.2-5-3.6-5-7V5l5-2z"/></svg>`;
+      case 'cross':
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><path ${common} d="M10 4v12M4 10h12"/></svg>`;
+      case 'book':
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><path ${common} d="M5 4h6a2 2 0 012 2v10H7a2 2 0 00-2 2V4z"/><path ${common} d="M13 6h2v12h-2"/></svg>`;
+      case 'tree':
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><path ${common} d="M10 4l4 5H6l4-5z"/><path ${common} d="M10 9v6"/><path ${common} d="M8.5 15h3"/></svg>`;
+      case 'leaf':
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><path ${common} d="M4 11c0-4 4-7 11-7 0 7-3 11-7 11-2.2 0-4-1.8-4-4z"/><path ${common} d="M7 13l5-5"/></svg>`;
+      case 'store':
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><path ${common} d="M4 8h12l-1-3H5l-1 3z"/><path ${common} d="M5 8v7h10V8"/><path ${common} d="M8 15v-3h4v3"/></svg>`;
+      case 'alert':
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><path ${common} d="M10 3l7 13H3L10 3z"/><path ${common} d="M10 8v4"/><circle cx="10" cy="14" r="1" fill="#fff"/></svg>`;
+      case 'sound':
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><path ${common} d="M4 12h3l4 3V5L7 8H4v4z"/><path ${common} d="M13 8.5c1 .8 1 2.2 0 3"/><path ${common} d="M14.8 7c1.8 1.5 1.8 4.5 0 6"/></svg>`;
+      case 'light':
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><path ${common} d="M10 3a4 4 0 00-2.5 7.1c.9.7 1.5 1.7 1.5 2.9h2c0-1.2.6-2.2 1.5-2.9A4 4 0 0010 3z"/><path ${common} d="M8.3 15h3.4M8.8 17h2.4"/></svg>`;
+      default:
+        return `<svg viewBox="0 0 20 20" width="12" height="12"><path ${common} d="M10 3a5 5 0 00-5 5c0 3.3 5 9 5 9s5-5.7 5-9a5 5 0 00-5-5z"/><circle cx="10" cy="8" r="1.5" fill="#fff"/></svg>`;
+    }
+  }
+
+  private getAnnotationMarkerIconGlyph(icon: string): string {
+    switch (icon) {
+      case 'cone': return '🚧';
+      case 'bus': return '🚌';
+      case 'shield': return '🛡️';
+      case 'cross': return '✚';
+      case 'book': return '📘';
+      case 'tree': return '🌳';
+      case 'leaf': return '🍃';
+      case 'store': return '🏪';
+      case 'alert': return '⚠️';
+      case 'sound': return '🔊';
+      case 'light': return '💡';
+      default: return '📍';
+    }
+  }
+
+  private buildPinMarkerHtml(color: string, iconSvg: string): string {
+    return `
+      <div style="
+        width: 36px;
+        height: 48px;
+        position: relative;
+        transform: translate(-2px, -10px);
+        filter: drop-shadow(0 8px 12px rgba(15, 23, 42, 0.28));
+      ">
+        <svg viewBox="0 0 36 48" width="36" height="48" style="display:block;">
+          <path
+            d="M18 2C10.3 2 4 8.2 4 15.9c0 10.5 11.3 22.6 13.3 24.7a1 1 0 0 0 1.4 0C20.7 38.5 32 26.4 32 15.9 32 8.2 25.7 2 18 2Z"
+            fill="${color}"
+            stroke="#ffffff"
+            stroke-width="2"
+          />
+        </svg>
+        <div style="
+          position: absolute;
+          top: 9px;
+          left: 50%;
+          transform: translateX(-50%);
+          width: 18px;
+          height: 18px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">
+          ${iconSvg}
+        </div>
+      </div>
+    `;
+  }
+
+  private buildAnnotationMarkerHtml(config: AnnotationMarkerConfig): string {
+    return this.buildPinMarkerHtml(config.color, this.getAnnotationMarkerIconSvg(config.icon));
+  }
+
+  private getEntityMarkerIconSvg(): string {
+    const common = 'stroke="#ffffff" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"';
+    return `<svg viewBox="0 0 20 20" width="12" height="12">
+      <rect x="4" y="5" width="12" height="11" rx="1.5" ${common}/>
+      <path ${common} d="M8 16v-3h4v3M8 8h.01M12 8h.01M8 11h.01M12 11h.01"/>
+    </svg>`;
   }
 
   // ── Map rendering ─────────────────────────────────────────────────────────
@@ -1382,7 +1825,23 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     this.entityLayer.addTo(this.map);
     this.pointLayer.addTo(this.map);
     this.selectedNeighborhoodLayer.addTo(this.map);
-    this.trackingLayer.addTo(this.map);
+    this.applyMapModeLayerVisibility();
+  }
+
+  private applyMapModeLayerVisibility(): void {
+    if (!this.map) return;
+    const shouldShowTracking = this.currentMapMode === 'officials' && this.showRealtimeOfficials;
+    if (shouldShowTracking) {
+      if (!this.map.hasLayer(this.trackingLayer)) {
+        this.trackingLayer.addTo(this.map);
+      }
+      return;
+    }
+
+    if (this.map.hasLayer(this.trackingLayer)) {
+      this.map.removeLayer(this.trackingLayer);
+    }
+    this.showNoOfficialsForSelectedEntity = false;
   }
 
   private loadTerritorialData(): void {
@@ -1472,7 +1931,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     const marker = L.marker(coords, {
       icon: L.divIcon({
         className: 'map-entity-marker',
-        html: `<div style="width: 18px; height: 18px; border: 2px solid #fff; border-radius: 50%; background: #16a34a; box-shadow: 0 0 0 5px rgba(22, 163, 74, 0.22);"></div>`
+        html: this.buildPinMarkerHtml('#16a34a', this.getEntityMarkerIconSvg())
       }),
       draggable: false
     });
@@ -1692,18 +2151,17 @@ export class MapComponent implements AfterViewInit, OnDestroy {
         if (!this.passesCategoryFilter(point.id_annotation)) continue;
         this.visibleAnnotationCount += 1;
 
-        const markerStyle = this.getAnnotationMarkerStyle(point.id_annotation);
-        // Annotation markers → dedicated annotationLayer with amber icon
+        const markerConfig = this.getAnnotationMarkerConfigForAnnotation(point.id_annotation);
         const marker = L.marker([point.latitude, point.longitude], {
           icon: L.divIcon({
             className: 'map-annotation-marker',
-            html: `<div style="width: 20px; height: 20px; border: 2px solid #fff; border-radius: 50%; background: ${markerStyle.background}; box-shadow: 0 0 0 5px ${markerStyle.shadow};"></div>`
+            html: this.buildAnnotationMarkerHtml(markerConfig)
           }),
           draggable: false
         });
         marker.on('click', () => {
           if (point.id_annotation != null) {
-            this.openAnnotationPopup(marker, point.id_annotation, point);
+            this.openAnnotationDetailPanel(marker, point.id_annotation, point);
           }
         });
         marker.bindPopup(`Cargando anotación #${point.id_annotation ?? point.id_point}...`);
@@ -1724,7 +2182,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  private openAnnotationPopup(marker: L.Marker, annotationId: number, point: Point): void {
+  private openAnnotationDetailPanel(marker: L.Marker, annotationId: number, point: Point): void {
     marker.setPopupContent(`Cargando anotación #${annotationId}...`);
 
     forkJoin({
@@ -1758,9 +2216,54 @@ export class MapComponent implements AfterViewInit, OnDestroy {
           votesCount
         };
 
+        this.selectedAnnotationDetail = this.buildAnnotationDetailPanelData(annotationId, point, popupData);
         marker.setPopupContent(this.buildAnnotationPopupHtml(annotationId, point, popupData));
         marker.openPopup();
+        this.triggerRealtimeViewSync();
       });
+  }
+
+  private buildAnnotationDetailPanelData(
+    annotationId: number,
+    point: Point,
+    data: AnnotationPopupData
+  ): AnnotationDetailPanelData {
+    const markerConfig = this.getAnnotationMarkerConfig(data.categories);
+    const primaryCategory = data.categories.find((category) => category.id_parent_category == null) ?? data.categories[0] ?? null;
+    const subcategory = data.categories.find((category) => category.id_parent_category != null) ?? null;
+    const neighborhood = data.annotation?.id_neighborhood != null
+      ? this.neighborhoods.find((item) => item.id_neighborhood === data.annotation?.id_neighborhood)
+      : null;
+    const citizen = data.annotation?.id_citizen != null
+      ? this.annotationCitizens.find((item) => item.id_citizen === data.annotation?.id_citizen)
+      : null;
+
+    return {
+      idAnnotation: annotationId,
+      markerType: markerConfig.markerType,
+      markerIcon: this.getAnnotationMarkerIconGlyph(markerConfig.icon),
+      markerColor: markerConfig.color,
+      title: `Anotación #${annotationId}`,
+      categoryName: primaryCategory?.name ?? null,
+      subcategoryName: subcategory?.name ?? null,
+      categories: data.categories.map((category) => category.name),
+      description: data.annotation?.description?.trim() || 'Sin descripción registrada.',
+      status: data.annotation?.status ?? null,
+      registrationDate: data.annotation?.registration_date
+        ? new Date(data.annotation.registration_date).toLocaleString()
+        : null,
+      address: citizen?.address ?? null,
+      neighborhoodName: neighborhood?.name ?? null,
+      communeName: null,
+      cityName: null,
+      latitude: point.latitude,
+      longitude: point.longitude,
+      createdByName: citizen?.name ?? null,
+      createdByType: citizen ? 'Ciudadano' : null,
+      averageRating: data.averageVotes,
+      votesCount: data.votesCount,
+      evidences: data.evidences
+    };
   }
 
   private buildAnnotationPopupHtml(annotationId: number, point: Point, data: AnnotationPopupData): string {
@@ -1795,6 +2298,13 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       </div>
     `;
   }
+
+  closeAnnotationDetailPanel(): void {
+    this.selectedAnnotationDetail = null;
+    this.triggerRealtimeViewSync();
+  }
+
+  readonly resolveEvidenceImageUrl = (path: string): string => this.apiClient.imageUrl(path);
 
   private focusOnNeighborhood(neighborhoodId: number | null): void {
     // Sincroniza selección lógica con el barrio enfocado (incluye click sobre polígonos).
@@ -1943,6 +2453,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
           next: ([officialCollection, entityCollection]) => {
             this.applyEntityBaseState(entityCollection.items);
             this.applyOfficialsBaseState(officialCollection.items);
+            this.auditRealtimeSync('polling-refresh');
           }
         });
     }, pollingMs);
@@ -1977,7 +2488,10 @@ export class MapComponent implements AfterViewInit, OnDestroy {
         lastUpdate: official.last_gps_update ?? null,
         gps_active: official.gps_active
       };
-      this.latestTrackingByOfficial.set(official.id_official, snapshot);
+      this.latestTrackingByOfficial.set(
+        official.id_official,
+        this.mergeTrackingSnapshot(official.id_official, snapshot, 'rest')
+      );
     }
 
     for (const trackedId of Array.from(this.latestTrackingByOfficial.keys())) {
@@ -1991,6 +2505,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       this.rebuildVisibleTrackingMarkers();
     }
     this.refreshEntityMarkers();
+    this.triggerRealtimeViewSync();
   }
 
   private resolveOfficialDisplayCoords(official: Official): L.LatLngTuple | null {
@@ -2036,7 +2551,9 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       .listenTracking()
       .pipe(takeUntil(this.destroy$))
       .subscribe((payload) => {
-        this.applyTrackingPayload(payload);
+        this.ngZone.run(() => {
+          this.applyTrackingPayload(payload);
+        });
       });
 
     this.trackingService
@@ -2063,31 +2580,50 @@ export class MapComponent implements AfterViewInit, OnDestroy {
         lastUpdate: officialTracking.lastUpdate ?? officialTracking.last_gps_update ?? new Date().toISOString(),
         last_gps_update: officialTracking.last_gps_update ?? officialTracking.lastUpdate ?? new Date().toISOString()
       };
-      this.latestTrackingByOfficial.set(officialTracking.id_official, normalized);
-      this.updateOfficialMarker(normalized);
+      const merged = this.mergeTrackingSnapshot(officialTracking.id_official, normalized, 'socket');
+      this.latestTrackingByOfficial.set(officialTracking.id_official, merged);
+      this.updateOfficialMarker(merged);
     }
+    this.auditRealtimeSync('socket-update');
     this.refreshEntityMarkers();
+    this.triggerRealtimeViewSync();
   }
 
   private startOfficialOfflineDetector(): void {
     if (this.officialOfflineIntervalId != null) return;
     this.officialOfflineIntervalId = setInterval(() => {
-      const nowMs = Date.now();
-      const staleMs = 30_000;
-      let changed = false;
-      for (const tracking of this.latestTrackingByOfficial.values()) {
-        const ts = tracking.lastUpdate ?? tracking.last_gps_update;
-        if (!ts) continue;
-        const trackedAt = new Date(ts).getTime();
-        if (!Number.isFinite(trackedAt)) continue;
-        if ((nowMs - trackedAt) > staleMs && tracking.gps_active !== false) {
-          tracking.gps_active = false;
-          changed = true;
+      this.ngZone.run(() => {
+        const nowMs = Date.now();
+        const staleMs = 30_000;
+        let changed = false;
+        for (const tracking of this.latestTrackingByOfficial.values()) {
+          const previousState = this.resolveOfficialConnectionState(tracking);
+          const ts = tracking.lastUpdate ?? tracking.last_gps_update;
+          if (!ts) continue;
+          const trackedAt = new Date(ts).getTime();
+          if (!Number.isFinite(trackedAt)) continue;
+          if ((nowMs - trackedAt) > staleMs && tracking.gps_active !== false) {
+            tracking.gps_active = false;
+            const nextState = this.resolveOfficialConnectionState(tracking);
+            this.pushTrackingDebugEvent({
+              ts: new Date().toISOString(),
+              source: 'offline-detector',
+              officialId: tracking.id_official,
+              previousState,
+              nextState,
+              gps_active: typeof tracking.gps_active === 'boolean' ? tracking.gps_active : null,
+              lastUpdate: tracking.lastUpdate ?? tracking.last_gps_update ?? null,
+              markerType: this.getMarkerTypeByOfficialId(tracking.id_official),
+              panelLabel: this.getPanelLabelByOfficialId(tracking.id_official)
+            });
+            changed = true;
+          }
         }
-      }
-      if (changed) {
-        this.rebuildVisibleTrackingMarkers();
-      }
+        this.auditRealtimeSync('offline-detector');
+        if (changed) {
+          this.rebuildVisibleTrackingMarkers();
+        }
+      });
     }, 5_000);
   }
 
@@ -2109,19 +2645,27 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       const officialId = official.id_official;
       const adjustedCoords = this.getAdjustedOfficialCoords(officialId, official.id_entity, [latitude, longitude]);
       const entityName = this.trackingEntities.find((entity) => entity.id_entity === official.id_entity)?.name ?? `#${official.id_entity}`;
-      const gpsStatus = gps_active ? 'GPS activo' : 'Sin conexión';
+      const state = this.resolveOfficialConnectionState({
+        id_official: official.id_official,
+        id_entity: official.id_entity,
+        latitude,
+        longitude,
+        gps_active
+      });
+      this.officialConnectionStateById.set(officialId, state);
+      const gpsStatus = this.connectionStateLabel(state);
       const popupContent = `<strong>${official.name}</strong><br>Entidad: ${entityName}<br>Estado: ${gpsStatus}`;
       const existingMarker = this.officialMarkers.get(officialId);
 
       if (existingMarker) {
         existingMarker.setLatLng(adjustedCoords);
-        existingMarker.setIcon(this.buildOfficialIcon(gps_active));
+        existingMarker.setIcon(this.buildOfficialIcon(state));
         existingMarker.bindPopup(popupContent);
         return;
       }
 
       const marker = L.marker(adjustedCoords, {
-        icon: this.buildOfficialIcon(gps_active),
+        icon: this.buildOfficialIcon(state),
         draggable: false
       });
       marker.bindPopup(popupContent);
@@ -2150,65 +2694,85 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       [officialTracking.latitude, officialTracking.longitude]
     );
 
-    if (!this.showRealtimeOfficials || !this.isOfficialVisibleForFilters(officialTracking.id_official, entityId)) {
+    if (!this.shouldRenderOfficial(officialTracking)) {
       this.removeOfficialMarker(officialTracking.id_official);
       this.updateNoOfficialsMessageState();
       return;
     }
 
     const existingMarker = this.officialMarkers.get(officialTracking.id_official);
+    const connectionState = this.resolveOfficialConnectionState(officialTracking);
+    this.officialConnectionStateById.set(officialTracking.id_official, connectionState);
 
     if (existingMarker) {
       existingMarker.setLatLng(adjustedTrackingCoords);
-      const isGpsActive = this.isOfficialGpsActive(officialTracking);
-      existingMarker.setIcon(this.buildOfficialIcon(isGpsActive));
-      existingMarker.bindPopup(this.buildOfficialPopupContent(officialTracking));
+      existingMarker.setIcon(this.buildOfficialIcon(connectionState));
+      existingMarker.bindPopup(this.buildOfficialPopupContent(officialTracking, connectionState));
       this.updateNoOfficialsMessageState();
       return;
     }
 
     const marker = L.marker(adjustedTrackingCoords, {
-      icon: this.buildOfficialIcon(this.isOfficialGpsActive(officialTracking)),
+      icon: this.buildOfficialIcon(connectionState),
       draggable: false
     });
-    marker.bindPopup(this.buildOfficialPopupContent(officialTracking));
+    marker.bindPopup(this.buildOfficialPopupContent(officialTracking, connectionState));
     this.officialMarkers.set(officialTracking.id_official, marker);
     marker.addTo(this.trackingLayer);
     this.updateNoOfficialsMessageState();
   }
 
-  private buildOfficialIcon(gps_active: boolean): L.DivIcon {
+  private buildOfficialIcon(connectionState: OfficialConnectionState): L.DivIcon {
+    const markerDotColor = connectionState === 'ONLINE'
+      ? '#22c55e'
+      : connectionState === 'LAST_KNOWN_POSITION'
+        ? '#2563eb'
+        : '#94a3b8';
     return L.divIcon({
       className: '',
       html: `
         <div style="
-          width: 62px;
-          height: 62px;
+          width: 54px;
+          height: 54px;
           border-radius: 50%;
-          background:
-            ${gps_active ? '#00ff2a' : '#9ca3af'};
-          border: 4px solid white;
+          background: #dbeafe;
+          border: 3px solid #3b82f6;
           box-shadow:
-            0 0 0 12px rgba(0,255,0,.25),
-            0 0 35px rgba(0,255,0,.6);
+            0 0 0 5px rgba(255,255,255,.95),
+            0 8px 18px rgba(15,35,95,.2);
           display:flex;
           align-items:center;
           justify-content:center;
-          font-size:28px;
+          font-size:18px;
           cursor:pointer;
           user-select:none;
+          position: relative;
+          color: #1d4ed8;
           transition: all .25s ease;
         ">
-          👤
+          <span style="font-weight:800;">👤</span>
+          <span style="
+            position:absolute;
+            right:-1px;
+            bottom:-1px;
+            width:13px;
+            height:13px;
+            border-radius:999px;
+            border:2px solid #fff;
+            background:${markerDotColor};
+          "></span>
         </div>
       `,
-      iconSize: [62, 62],
-      iconAnchor: [31, 31],
+      iconSize: [54, 54],
+      iconAnchor: [27, 27],
       popupAnchor: [0, -30]
     });
   }
 
-  private buildOfficialPopupContent(officialTracking: OfficialTracking): string {
+  private buildOfficialPopupContent(
+    officialTracking: OfficialTracking,
+    connectionState: OfficialConnectionState = this.getOfficialConnectionStateForUi(officialTracking.id_official)
+  ): string {
     const knownOfficial = this.officialsById.get(officialTracking.id_official);
     const entityId = officialTracking.id_entity ?? knownOfficial?.id_entity ?? null;
     const entityName = entityId != null
@@ -2217,7 +2781,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     const lastUpdate = officialTracking.last_gps_update
       ? new Date(officialTracking.last_gps_update).toLocaleString()
       : 'Sin dato';
-    const gpsStatus = this.isOfficialGpsActive(officialTracking) ? 'Activo' : 'Sin conexión';
+    const gpsStatus = this.connectionStateLabel(connectionState);
     return `<strong>${knownOfficial?.name ?? `Funcionario #${officialTracking.id_official}`}</strong><br>`
       + `Correo: ${knownOfficial?.email ?? 'Sin dato'}<br>`
       + `Teléfono: ${knownOfficial?.phone ?? 'Sin dato'}<br>`
@@ -2262,15 +2826,18 @@ export class MapComponent implements AfterViewInit, OnDestroy {
 
   private removeOfficialMarker(idOfficial: number): void {
     const marker = this.officialMarkers.get(idOfficial);
-    if (!marker) return;
-    this.trackingLayer.removeLayer(marker);
-    this.officialMarkers.delete(idOfficial);
+    if (marker) {
+      this.trackingLayer.removeLayer(marker);
+      this.officialMarkers.delete(idOfficial);
+    }
+    this.officialConnectionStateById.delete(idOfficial);
     this.updateNoOfficialsMessageState();
   }
 
   private rebuildVisibleTrackingMarkers(): void {
     this.trackingLayer.clearLayers();
     this.officialMarkers.clear();
+    this.officialConnectionStateById.clear();
 
     if (!this.showRealtimeOfficials) {
       this.showNoOfficialsForSelectedEntity = false;
@@ -2281,6 +2848,8 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       this.updateOfficialMarker(tracking);
     }
     this.updateNoOfficialsMessageState();
+    this.auditRealtimeSync('rebuild-visible-markers');
+    this.triggerRealtimeViewSync();
   }
 
   private isOfficialStatusActive(status: unknown): boolean {
@@ -2295,8 +2864,263 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     return normalized === 'active' || normalized === 'activo' || normalized === 'activa';
   }
 
-  private isOfficialGpsActive(officialTracking: OfficialTracking): boolean {
-    return officialTracking.gps_active === true;
+  isOfficialGpsActive(officialTracking: OfficialTracking): boolean {
+    return this.getOfficialConnectionStateForUi(officialTracking.id_official) === 'ONLINE';
+  }
+
+  private resolveOfficialConnectionState(officialTracking: OfficialTracking): OfficialConnectionState {
+    const knownOfficial = this.officialsById.get(officialTracking.id_official);
+    if (knownOfficial && !this.isOfficialStatusActive(knownOfficial.status)) {
+      return 'OFFLINE';
+    }
+
+    const gpsActive = officialTracking.gps_active === true;
+    const hasKnownPosition = Number.isFinite(officialTracking.latitude) && Number.isFinite(officialTracking.longitude);
+
+    if (gpsActive) {
+      return 'ONLINE';
+    }
+
+    if (hasKnownPosition) {
+      return 'LAST_KNOWN_POSITION';
+    }
+
+    return 'OFFLINE';
+  }
+
+  private connectionStateLabel(state: OfficialConnectionState): string {
+    if (state === 'ONLINE') return 'En línea';
+    if (state === 'LAST_KNOWN_POSITION') return 'Última posición conocida';
+    return 'Sin conexión';
+  }
+
+  getOfficialConnectionStateLabel(officialTracking: OfficialTracking): string {
+    return this.connectionStateLabel(this.resolveOfficialConnectionState(officialTracking));
+  }
+
+  getOfficialPanelConnectionLabel(officialTracking: OfficialTracking): string {
+    return this.getOfficialConnectionStateForUi(officialTracking.id_official) === 'ONLINE'
+      ? 'En línea'
+      : 'Sin conexión';
+  }
+
+  isOfficialPanelOffline(officialTracking: OfficialTracking): boolean {
+    return this.getOfficialConnectionStateForUi(officialTracking.id_official) === 'OFFLINE';
+  }
+
+  isOfficialPanelLastKnown(officialTracking: OfficialTracking): boolean {
+    return this.getOfficialConnectionStateForUi(officialTracking.id_official) === 'LAST_KNOWN_POSITION';
+  }
+
+  private getOfficialConnectionStateForUi(idOfficial: number): OfficialConnectionState {
+    const renderedMarkerState = this.getMarkerConnectionStateByOfficialId(idOfficial);
+    if (
+      renderedMarkerState === 'ONLINE'
+      || renderedMarkerState === 'OFFLINE'
+      || renderedMarkerState === 'LAST_KNOWN_POSITION'
+    ) {
+      return renderedMarkerState;
+    }
+    return this.officialConnectionStateById.get(idOfficial) ?? 'OFFLINE';
+  }
+
+  private shouldRenderOfficial(officialTracking: OfficialTracking): boolean {
+    if (!this.showRealtimeOfficials) {
+      return false;
+    }
+
+    const knownOfficial = this.officialsById.get(officialTracking.id_official);
+    if (knownOfficial && !this.isOfficialStatusActive(knownOfficial.status)) {
+      return false;
+    }
+
+    const entityId = officialTracking.id_entity ?? knownOfficial?.id_entity ?? null;
+    return this.isOfficialVisibleForFilters(officialTracking.id_official, entityId);
+  }
+
+  private mergeTrackingSnapshot(
+    idOfficial: number,
+    incoming: OfficialTrackingSnapshot,
+    source: TrackingSource
+  ): OfficialTrackingSnapshot {
+    const current = this.latestTrackingByOfficial.get(idOfficial);
+    if (!current) {
+      this.pushTrackingDebugEvent({
+        ts: new Date().toISOString(),
+        source: source === 'socket' ? 'merge-tracking-snapshot:socket' : 'merge-tracking-snapshot:rest',
+        officialId: idOfficial,
+        previousState: 'UNKNOWN',
+        nextState: this.resolveOfficialConnectionState(incoming),
+        gps_active: typeof incoming.gps_active === 'boolean' ? incoming.gps_active : null,
+        lastUpdate: incoming.lastUpdate ?? incoming.last_gps_update ?? null,
+        markerType: this.getMarkerTypeByOfficialId(idOfficial),
+        panelLabel: this.getPanelLabelByOfficialId(idOfficial)
+      });
+      this.auditRealtimeSync(source === 'socket' ? 'merge-tracking-snapshot:socket' : 'merge-tracking-snapshot:rest');
+      return incoming;
+    }
+
+    const incomingTs = this.toTimestampMs(incoming.lastUpdate ?? incoming.last_gps_update);
+    const currentTs = this.toTimestampMs(current.lastUpdate ?? current.last_gps_update);
+    const incomingWins = incomingTs > currentTs || (incomingTs === currentTs && source === 'socket');
+    const primary = incomingWins ? incoming : current;
+    const secondary = incomingWins ? current : incoming;
+
+    const merged = {
+      ...secondary,
+      ...primary,
+      id_official: primary.id_official ?? secondary.id_official ?? idOfficial,
+      id_entity: primary.id_entity ?? secondary.id_entity ?? null,
+      latitude: this.pickFiniteNumber(primary.latitude, secondary.latitude, 0),
+      longitude: this.pickFiniteNumber(primary.longitude, secondary.longitude, 0),
+      lastUpdate: primary.lastUpdate ?? primary.last_gps_update ?? secondary.lastUpdate ?? secondary.last_gps_update ?? null,
+      last_gps_update: primary.last_gps_update ?? primary.lastUpdate ?? secondary.last_gps_update ?? secondary.lastUpdate ?? null,
+      gps_active: this.pickBoolean(primary.gps_active, secondary.gps_active)
+    };
+    this.pushTrackingDebugEvent({
+      ts: new Date().toISOString(),
+      source: source === 'socket' ? 'merge-tracking-snapshot:socket' : 'merge-tracking-snapshot:rest',
+      officialId: idOfficial,
+      previousState: this.resolveOfficialConnectionState(current),
+      nextState: this.resolveOfficialConnectionState(merged),
+      gps_active: typeof merged.gps_active === 'boolean' ? merged.gps_active : null,
+      lastUpdate: merged.lastUpdate ?? merged.last_gps_update ?? null,
+      markerType: this.getMarkerTypeByOfficialId(idOfficial),
+      panelLabel: this.getPanelLabelByOfficialId(idOfficial)
+    });
+    this.auditRealtimeSync(source === 'socket' ? 'merge-tracking-snapshot:socket' : 'merge-tracking-snapshot:rest');
+    return merged;
+  }
+
+  private pushTrackingDebugEvent(event: TrackingDebugEvent): void {
+    this.trackingDebugBuffer.push(event);
+    if (this.trackingDebugBuffer.length > this.trackingDebugBufferMaxSize) {
+      this.trackingDebugBuffer.splice(0, this.trackingDebugBuffer.length - this.trackingDebugBufferMaxSize);
+    }
+    (window as unknown as { trackingDebugBuffer?: TrackingDebugEvent[] }).trackingDebugBuffer = [...this.trackingDebugBuffer];
+  }
+
+  private getMarkerConnectionStateByOfficialId(idOfficial: number): OfficialConnectionState | 'MISSING_MARKER' | 'UNKNOWN' {
+    const marker = this.officialMarkers.get(idOfficial);
+    if (!marker) return 'MISSING_MARKER';
+    const html = marker.options?.icon && 'options' in marker.options.icon
+      ? String((marker.options.icon as L.DivIcon).options?.html ?? '').toLowerCase()
+      : '';
+    if (html.includes('#22c55e')) return 'ONLINE';
+    if (html.includes('#2563eb')) return 'LAST_KNOWN_POSITION';
+    if (html.includes('#94a3b8')) return 'OFFLINE';
+    return 'UNKNOWN';
+  }
+
+  private getMarkerTypeByOfficialId(idOfficial: number): TrackingDebugEvent['markerType'] {
+    const state = this.getMarkerConnectionStateByOfficialId(idOfficial);
+    if (state === 'ONLINE') return 'dot-green';
+    if (state === 'LAST_KNOWN_POSITION') return 'dot-blue';
+    if (state === 'OFFLINE') return 'dot-gray';
+    if (state === 'MISSING_MARKER') return 'missing-marker';
+    return 'unknown';
+  }
+
+  private getPanelLabelByOfficialId(idOfficial: number): string | null {
+    const panelItem = this.getRealtimePanelItems().find((item) => item.id_official === idOfficial);
+    if (!panelItem) return null;
+    return this.getOfficialPanelConnectionLabel(panelItem);
+  }
+
+  private auditRealtimeSync(source: TrackingDebugSource): void {
+    const timestamp = new Date().toISOString();
+    const panelItems = this.getRealtimePanelItems();
+    const panelById = new Map<number, OfficialTrackingSnapshot>(panelItems.map((item) => [item.id_official, item]));
+    const trackedIds = new Set<number>([
+      ...Array.from(this.latestTrackingByOfficial.keys()),
+      ...Array.from(this.officialMarkers.keys()),
+      ...panelItems.map((item) => item.id_official)
+    ]);
+
+    const rows = Array.from(trackedIds).map((idOfficial) => {
+      const tracking = this.latestTrackingByOfficial.get(idOfficial);
+      const panelItem = panelById.get(idOfficial);
+      const resolvedState = tracking ? this.resolveOfficialConnectionState(tracking) : 'UNKNOWN';
+      const mapState = this.getMarkerConnectionStateByOfficialId(idOfficial);
+      const panelState = panelItem ? this.resolveOfficialConnectionState(panelItem) : 'UNKNOWN';
+      const panelLabel = panelItem ? this.getOfficialPanelConnectionLabel(panelItem) : null;
+      return {
+        officialId: idOfficial,
+        name: this.getOfficialDisplayName(idOfficial),
+        mapState,
+        panelState,
+        resolvedState,
+        timestamp,
+        eventSource: source,
+        mapMarkerType: this.getMarkerTypeByOfficialId(idOfficial),
+        panelConnectionState: panelState,
+        gps_active: tracking?.gps_active ?? null,
+        status: this.officialsById.get(idOfficial)?.status ?? null,
+        latitude: tracking?.latitude ?? null,
+        longitude: tracking?.longitude ?? null,
+        last_gps_update: tracking?.last_gps_update ?? null,
+        lastUpdate: tracking?.lastUpdate ?? null,
+        resolveOfficialConnectionStateResult: resolvedState,
+        isOnlineForMap: mapState === 'ONLINE',
+        isOnlineForPanel: panelState === 'ONLINE',
+        panelLabel
+      };
+    });
+
+    const stateMismatch = rows
+      .filter((row) => (row.mapState === 'OFFLINE' || row.mapState === 'LAST_KNOWN_POSITION') && row.panelState === 'ONLINE')
+      .map((row) => ({
+        officialId: row.officialId,
+        name: row.name,
+        mapState: row.mapState,
+        panelState: row.panelState,
+        resolvedState: row.resolvedState,
+        timestamp: row.timestamp,
+        source: row.eventSource,
+        gps_active: row.gps_active,
+        status: row.status,
+        lastUpdate: row.lastUpdate ?? row.last_gps_update ?? null,
+        reason: 'map marker visual state is non-online while panel state is online'
+      }));
+
+    console.debug('[RealtimeSyncAudit]', { source, timestamp, rows, stateMismatch });
+
+    if (stateMismatch.length > 0) {
+      for (const mismatch of stateMismatch) {
+        console.warn('[RealtimeStateMismatch]', mismatch);
+      }
+      console.warn('[RealtimeStateMismatchBufferDump]', [...this.trackingDebugBuffer]);
+    }
+  }
+
+  private triggerRealtimeViewSync(): void {
+    if (this.destroy$.isStopped) return;
+    queueMicrotask(() => {
+      if (this.destroy$.isStopped) return;
+      try {
+        this.changeDetectorRef.detectChanges();
+      } catch {
+        // Best-effort UI sync for realtime updates.
+      }
+    });
+  }
+
+  private toTimestampMs(value: string | null | undefined): number {
+    if (!value) return 0;
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  private pickFiniteNumber(primary: number | undefined, fallback: number | undefined, defaultValue: number): number {
+    if (typeof primary === 'number' && Number.isFinite(primary)) return primary;
+    if (typeof fallback === 'number' && Number.isFinite(fallback)) return fallback;
+    return defaultValue;
+  }
+
+  private pickBoolean(primary: boolean | undefined, fallback: boolean | undefined): boolean | undefined {
+    if (typeof primary === 'boolean') return primary;
+    if (typeof fallback === 'boolean') return fallback;
+    return undefined;
   }
 
   private updateNoOfficialsMessageState(): void {

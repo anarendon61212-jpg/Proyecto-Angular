@@ -1,20 +1,20 @@
 .file-upload {
   align-items: center;
-  border: 1.5px dashed #9db8ff;
-  border-radius: 16px;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 12px;
   color: var(--color-ink);
   display: grid;
   gap: 0.45rem;
   justify-items: center;
-  min-height: 148px;
-  padding: 1.25rem;
+  min-height: 126px;
+  padding: 1rem;
   text-align: center;
 }
 
 .file-upload:hover,
 .file-upload--dragging {
-  background: var(--color-primary-soft);
-  border-color: var(--color-primary);
+  background: #f8fafc;
+  border-color: #94a3b8;
 }
 
 input {
@@ -22,16 +22,18 @@ input {
 }
 
 .file-upload__icon {
-  color: var(--color-primary);
-  font-size: 2rem;
+  color: #94a3b8;
+  font-size: 1.7rem;
 }
 
 strong {
-  font-size: 0.95rem;
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 small {
-  color: var(--color-muted);
+  color: #64748b;
+  font-size: 0.76rem;
 }
 
 ul {

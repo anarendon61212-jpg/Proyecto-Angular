@@ -14,6 +14,7 @@ import { DrawerPanelComponent } from '@shared/components/drawer-panel/drawer-pan
 import { ConfirmDialogService } from '@shared/services/confirm-dialog.service';
 import { ToastService } from '@shared/services/toast.service';
 import { GenericCrudFormComponent } from '@shared/components/generic-crud-form/generic-crud-form.component';
+import { SearchBoxComponent } from '@shared/components/search-box/search-box.component';
 import { DependencyCheck, EntityConfig } from '@core/config/entity-config';
  
 export interface DependencyCheckService {
@@ -33,24 +34,42 @@ interface DependencyCheckResult {
     DataTableComponent,
     PaginatorComponent,
     DrawerPanelComponent,
-    GenericCrudFormComponent
+    GenericCrudFormComponent,
+    SearchBoxComponent
   ],
   template: `
     <section class="app-card">
       <div class="section-header">
         <div>
-          <h2>{{ config.labelPlural }}</h2>
-          <p class="description">Gestiona los {{ config.labelPlural.toLowerCase() }} del sistema</p>
+          <h2>{{ config.name === 'categories' ? 'Gestión de Categorías y Subcategorías' : config.labelPlural }}</h2>
+          <p class="description">
+            {{ config.name === 'categories'
+              ? 'Administra las categorías que se utilizan para clasificar las anotaciones en el sistema.'
+              : 'Gestiona los ' + config.labelPlural.toLowerCase() + ' del sistema' }}
+          </p>
         </div>
         <button (click)="openCreateForm()" class="btn btn-primary">
           + Nuevo {{ config.label }}
         </button>
       </div>
+
+      @if (config.name === 'categories') {
+        <div class="list-toolbar">
+          <app-search-box
+            [value]="searchQuery()"
+            placeholder="Buscar categoría..."
+            ariaLabel="Buscar categoría"
+            (valueChange)="onSearchQueryChange($event)"
+          />
+          <button type="button" class="btn btn-secondary btn-filter">Filtros</button>
+        </div>
+      }
  
       <ng-container *ngIf="collection() as collection">
         <app-data-table
-          [title]="'Listado de ' + config.labelPlural"
-          [rows]="rowsForTable(collection.items)"
+          [title]="config.name === 'categories' ? 'Estructura de categorías' : 'Listado de ' + config.labelPlural"
+          [description]="config.name === 'categories' ? 'Consulta, crea, edita o elimina categorías y subcategorías.' : ''"
+          [rows]="filteredRowsForTable(collection.items)"
           [columns]="tableColumns"
           [actions]="allTableActions"
           (actionClick)="onTableAction($event)"
@@ -68,8 +87,16 @@ interface DependencyCheckResult {
     <!-- Drawer para formulario -->
     <app-drawer-panel
       [open]="isFormOpen()"
-      [title]="editingItem() ? 'Editar ' + config.label : 'Nuevo ' + config.label"
-      [description]="editingItem() ? 'Modifica los datos del ' + config.label.toLowerCase() : 'Crea un nuevo ' + config.label.toLowerCase()"
+      [title]="editingItem()
+        ? (config.name === 'categories' ? 'Editar categoría' : 'Editar ' + config.label)
+        : (config.name === 'categories' ? 'Nueva categoría' : 'Nuevo ' + config.label)"
+      [description]="editingItem()
+        ? (config.name === 'categories'
+          ? 'Actualiza la información de la categoría.'
+          : 'Modifica los datos del ' + config.label.toLowerCase())
+        : (config.name === 'categories'
+          ? 'Completa la información de la categoría.'
+          : 'Crea un nuevo ' + config.label.toLowerCase())"
       size="md"
       (closed)="closeForm()"
     >
@@ -121,6 +148,30 @@ interface DependencyCheckResult {
         cursor: not-allowed;
       }
     }
+
+    .list-toolbar {
+      align-items: center;
+      display: grid;
+      gap: 0.75rem;
+      grid-template-columns: minmax(240px, 380px) auto;
+      margin: 0 0 1.25rem;
+    }
+
+    .btn-filter {
+      justify-self: end;
+      min-height: 46px;
+      padding-inline: 1.1rem;
+    }
+
+    @media (max-width: 860px) {
+      .list-toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .btn-filter {
+        justify-self: start;
+      }
+    }
  
     .btn-primary {
       background-color: #4285f4;
@@ -157,6 +208,7 @@ export class GenericCrudListComponent implements OnInit, OnDestroy {
   readonly isFormOpen = signal(false);
   readonly editingItem = signal<any | null>(null);
   readonly formSelectOptions = signal<Record<string, any[]>>({});
+  readonly searchQuery = signal('');
   private autoRefreshIntervalId: ReturnType<typeof setInterval> | null = null;
  
   readonly tableColumns: DataTableColumn[] = [];
@@ -207,6 +259,11 @@ export class GenericCrudListComponent implements OnInit, OnDestroy {
     this.editingItem.set(null);
     this.isFormOpen.set(true);
   }
+
+  openEditForm(item: any): void {
+    this.editingItem.set(item);
+    this.isFormOpen.set(true);
+  }
  
   closeForm(): void {
     this.isFormOpen.set(false);
@@ -236,6 +293,10 @@ export class GenericCrudListComponent implements OnInit, OnDestroy {
     this.formValueChanged.emit(formValues);
   }
 
+  onSearchQueryChange(value: string): void {
+    this.searchQuery.set(value);
+  }
+
   rowsForTable(items: any[]): any[] {
     const selectOptions = this.formSelectOptions();
 
@@ -257,6 +318,25 @@ export class GenericCrudListComponent implements OnInit, OnDestroy {
 
       return decoratedItem;
     });
+  }
+
+  filteredRowsForTable(items: any[]): any[] {
+    const rows = this.rowsForTable(items);
+    const query = this.searchQuery().trim().toLowerCase();
+
+    if (!query || this.config.name !== 'categories') {
+      return rows;
+    }
+
+    return rows.filter((row) =>
+      Object.values(row).some((value) => {
+        if (value == null) return false;
+        if (typeof value === 'string' || typeof value === 'number') {
+          return String(value).toLowerCase().includes(query);
+        }
+        return false;
+      })
+    );
   }
  
   private async onDelete(item: any): Promise<void> {

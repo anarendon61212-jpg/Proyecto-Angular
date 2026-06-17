@@ -90,6 +90,15 @@ export class DataTableComponent<TItem extends object = Record<string, unknown>> 
     this.actionClick.emit({ actionId, row });
   }
 
+  isChildRow(row: TItem): boolean {
+    const candidate = row as Record<string, unknown>;
+    if (candidate['id_parent_category'] != null) {
+      return true;
+    }
+    const type = candidate['category_type'];
+    return typeof type === 'string' && type.toLowerCase().includes('subcategor');
+  }
+
   alignmentClass(align: TableAlignment = 'left'): string {
     return align === 'left' ? '' : `align-${align}`;
   }

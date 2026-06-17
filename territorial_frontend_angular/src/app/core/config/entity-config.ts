@@ -346,16 +346,18 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
       }
     ],
     columns: [
-      { key: 'image_url', header: 'Imagen', type: 'image', imageAltKey: 'name', width: '96px', emptyValue: 'Sin imagen' },
-      { key: 'name', header: 'Nombre' },
+      {
+        key: 'name',
+        header: 'Categoría / Subcategoría',
+        formatter: (row) => row.id_parent_category ? `↳ ${row.name}` : row.name
+      },
       {
         key: 'category_type',
         header: 'Tipo',
         formatter: (row) => row.id_parent_category ? 'Subcategoría' : 'Categoría padre'
       },
-      { key: 'id_parent_category_label', header: 'Categoría Padre', emptyValue: 'Sin categoría padre' },
-      { key: 'description', header: 'Descripción', emptyValue: '—' },
-      { key: 'status', header: 'Estado' }
+      { key: 'id_parent_category_label', header: 'Categoría padre', emptyValue: '—' },
+      { key: 'status', header: 'Estado', type: 'badge' }
     ],
     fields: [
       {

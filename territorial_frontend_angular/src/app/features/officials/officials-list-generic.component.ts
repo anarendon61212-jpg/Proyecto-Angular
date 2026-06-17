@@ -8,6 +8,7 @@ import {
   EntityCrudService
 } from '@core/api/territorial-crud.services';
 import { getEntityConfig } from '@core/config/entity-config';
+import { DataTableAction, DataTableActionEvent } from '@shared/components/data-table/data-table.component';
  
 /**
  * CU-02 Gestionar Funcionarios
@@ -41,7 +42,9 @@ import { getEntityConfig } from '@core/config/entity-config';
       [selectOptions]="selectOptions()"
       [fixedValues]="fixedValues()"
       [hiddenFields]="hiddenFields()"
+      [extraTableActions]="officialActions"
       [autoRefreshMs]="15000"
+      (tableAction)="onOfficialAction($event)"
     ></app-generic-crud-list>
   `,
   styles: [`
@@ -90,6 +93,9 @@ export class OfficialsListGenericComponent implements OnInit, AfterViewInit {
     return entityId ? { id_entity: entityId } : {};
   });
   readonly hiddenFields = computed(() => this.selectedEntityId() ? ['id_entity'] : []);
+  readonly officialActions: DataTableAction<any>[] = [
+    { id: 'view', label: 'Visualizar funcionario', icon: 'eye-outline' }
+  ];
  
   ngOnInit(): void {
     const entityId = Number(this.route.snapshot.queryParamMap.get('entityId') || 0);
@@ -103,6 +109,13 @@ export class OfficialsListGenericComponent implements OnInit, AfterViewInit {
     if (this.route.snapshot.queryParamMap.get('create') === 'true' && this.selectedEntityId()) {
       queueMicrotask(() => this.crudList?.openCreateForm());
     }
+  }
+
+  onOfficialAction(event: DataTableActionEvent<any>): void {
+    if (event.actionId !== 'view') {
+      return;
+    }
+    this.crudList?.openEditForm(event.row);
   }
  
   private loadEntityOptions(): void {

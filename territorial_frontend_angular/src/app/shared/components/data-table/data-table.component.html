@@ -33,7 +33,7 @@
 
         <tbody>
           @for (row of rows; track rowTrack(row, $index)) {
-            <tr>
+            <tr [class.data-table__row--child]="isChildRow(row)">
               @for (column of columns; track columnTrack(column)) {
                 <td [class]="alignmentClass(column.align)">
                   @if (column.type === 'badge') {
@@ -66,7 +66,21 @@
                       [attr.aria-label]="action.label"
                       (click)="emitAction(row, action.id)"
                     >
-                      <span aria-hidden="true">{{ action.icon || '•' }}</span>
+                      @if (action.icon === 'users-outline') {
+                        <svg class="data-table__action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                          <circle cx="9" cy="7" r="4"/>
+                          <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                        </svg>
+                      } @else if (action.icon === 'eye-outline') {
+                        <svg class="data-table__action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                      } @else {
+                        <span class="data-table__action-icon" aria-hidden="true">{{ action.icon || '•' }}</span>
+                      }
                       <span class="sr-only">{{ action.label }}</span>
                     </button>
                   }

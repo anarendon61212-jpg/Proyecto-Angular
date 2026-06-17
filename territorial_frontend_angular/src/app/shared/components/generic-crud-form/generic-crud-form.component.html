@@ -103,20 +103,27 @@
           }
         </label>
 
-        @if (previewUrls.get(config.fileField)) {
-          <div class="file-preview">
-            <img [src]="previewUrls.get(config.fileField)" [alt]="fileField.label + ' preview'" />
-          </div>
-        }
+        <div class="file-upload-layout">
+          <app-file-upload
+            [accept]="'image/png,image/jpeg,image/jpg,image/webp'"
+            [maxSizeMb]="2"
+            [label]="fileField.hint || fileField.placeholder || 'Arrastra archivo aquí'"
+            hint="o haz clic para seleccionar"
+            (filesSelected)="onFileSelected($event, config.fileField!)"
+            (invalidFiles)="onInvalidFiles($event)"
+          ></app-file-upload>
 
-        <app-file-upload
-          [accept]="'image/png,image/jpeg,image/jpg,image/webp'"
-          [maxSizeMb]="2"
-          [label]="fileField.hint || fileField.placeholder || 'Arrastra archivo aquí'"
-          hint="o haz clic para seleccionar"
-          (filesSelected)="onFileSelected($event, config.fileField!)"
-          (invalidFiles)="onInvalidFiles($event)"
-        ></app-file-upload>
+          <div class="file-preview-panel">
+            <span class="file-preview-panel__label">Vista previa</span>
+            <div class="file-preview">
+              @if (previewUrls.get(config.fileField)) {
+                <img [src]="previewUrls.get(config.fileField)" [alt]="fileField.label + ' preview'" />
+              } @else {
+                <span>Sin imagen</span>
+              }
+            </div>
+          </div>
+        </div>
       </div>
     }
   }
@@ -138,7 +145,7 @@
       @if (isSubmitting) {
         Guardando...
       } @else {
-        {{ item ? 'Actualizar' : 'Crear' }}
+        {{ submitLabel() }}
       }
     </button>
   </div>

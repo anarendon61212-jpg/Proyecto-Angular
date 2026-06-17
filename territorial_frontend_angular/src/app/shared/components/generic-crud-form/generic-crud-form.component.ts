@@ -381,6 +381,13 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
 
     this.cdr.markForCheck();
   }
+
+  submitLabel(): string {
+    if (this.config.name === 'categories') {
+      return this.item ? 'Actualizar categoría' : 'Guardar categoría';
+    }
+    return this.item ? 'Actualizar' : 'Crear';
+  }
  
   getFieldError(fieldKey: string): string {
     const control = this.form.get(fieldKey);
