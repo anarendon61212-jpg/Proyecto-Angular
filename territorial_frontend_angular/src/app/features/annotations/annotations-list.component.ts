@@ -46,8 +46,8 @@ import { normalizeStatus } from '../../core/utils/status.utils';
   standalone: true,
   imports: [CommonModule, FormsModule, ReactiveFormsModule, DataTableComponent, FileUploadComponent],
   template: `
-    <div class="annotations-page">
-      <section class="annotations-panel app-card">
+    <div class="annotations-page" [class.annotations-page--readonly]="!canCreateAnnotations()">
+      <section class="annotations-panel app-card" *ngIf="canCreateAnnotations()">
         <header class="annotations-header">
           <div>
             <h2>Anotaciones</h2>
@@ -269,6 +269,7 @@ import { normalizeStatus } from '../../core/utils/status.utils';
   `,
   styles: [
     ".annotations-page { display: grid; gap: 1rem; grid-template-columns: 1.4fr 1fr; min-height: calc(100vh - 3rem); }",
+    ".annotations-page--readonly { grid-template-columns: 1fr; }",
     ".annotations-panel, .annotations-list, .annotations-detail { padding: 1.25rem; }",
     ".annotations-header h2 { margin: 0 0 0.35rem; }",
     ".annotation-form { display: grid; gap: 1rem; }",

@@ -118,6 +118,7 @@ interface AnnotationMarkerConfig {
 
 interface AnnotationMarkerRule {
   label: string;
+  description: string;
   icon: string;
   color: string;
   markerType: string;
@@ -125,22 +126,22 @@ interface AnnotationMarkerRule {
 }
 
 const ANNOTATION_MARKER_RULES: AnnotationMarkerRule[] = [
-  { label: 'Infraestructura', icon: 'cone', color: '#f59e0b', markerType: 'infrastructure', keywords: ['infraestructura', 'road', 'via', 'calle', 'carretera', 'ande'] },
-  { label: 'Movilidad', icon: 'bus', color: '#f59e0b', markerType: 'mobility', keywords: ['movilidad', 'trafico', 'tránsito', 'bus', 'transporte'] },
-  { label: 'Seguridad', icon: 'shield', color: '#f59e0b', markerType: 'security', keywords: ['seguridad', 'alarma', 'alerta', 'delito', 'policia'] },
-  { label: 'Salud', icon: 'cross', color: '#f59e0b', markerType: 'health', keywords: ['salud', 'hospital', 'medic', 'medicina'] },
-  { label: 'Educación', icon: 'book', color: '#f59e0b', markerType: 'education', keywords: ['educacion', 'educación', 'colegio', 'escuela', 'universidad'] },
-  { label: 'Espacio público', icon: 'tree', color: '#f59e0b', markerType: 'public-space', keywords: ['espacio publico', 'espacio público', 'parque'] },
-  { label: 'Medio ambiente', icon: 'leaf', color: '#f59e0b', markerType: 'environment', keywords: ['medio ambiente', 'ambiental', 'residuo', 'basura', 'hoja'] },
-  { label: 'Comercio', icon: 'store', color: '#f59e0b', markerType: 'commerce', keywords: ['comercio', 'tienda', 'negocio', 'venta'] },
-  { label: 'Riesgo', icon: 'alert', color: '#f59e0b', markerType: 'risk', keywords: ['riesgo', 'desliz', 'incendio', 'emergencia'] },
-  { label: 'Ruido', icon: 'sound', color: '#f59e0b', markerType: 'noise', keywords: ['ruido', 'sonido', 'contaminacion auditiva', 'contaminación auditiva'] },
-  { label: 'Alumbrado', icon: 'light', color: '#f59e0b', markerType: 'lighting', keywords: ['alumbrado', 'luz', 'poste', 'iluminacion', 'iluminación'] }
+  { label: 'Infraestructura', description: 'Vías, andenes y daños físicos.', icon: 'cone', color: '#ef4444', markerType: 'infrastructure', keywords: ['infraestructura', 'road', 'via', 'calle', 'carretera', 'ande'] },
+  { label: 'Movilidad', description: 'Tránsito y transporte público.', icon: 'bus', color: '#3b82f6', markerType: 'mobility', keywords: ['movilidad', 'trafico', 'tránsito', 'bus', 'transporte'] },
+  { label: 'Seguridad', description: 'Riesgos de seguridad ciudadana.', icon: 'shield', color: '#7c3aed', markerType: 'security', keywords: ['seguridad', 'alarma', 'alerta', 'delito', 'policia'] },
+  { label: 'Salud', description: 'Eventos y alertas sanitarias.', icon: 'cross', color: '#22c55e', markerType: 'health', keywords: ['salud', 'hospital', 'medic', 'medicina'] },
+  { label: 'Educación', description: 'Entorno educativo y acceso.', icon: 'book', color: '#0ea5e9', markerType: 'education', keywords: ['educacion', 'educación', 'colegio', 'escuela', 'universidad'] },
+  { label: 'Espacio público', description: 'Parques, mobiliario y uso común.', icon: 'tree', color: '#16a34a', markerType: 'public-space', keywords: ['espacio publico', 'espacio público', 'parque'] },
+  { label: 'Medio ambiente', description: 'Residuos, flora y ecosistema.', icon: 'leaf', color: '#10b981', markerType: 'environment', keywords: ['medio ambiente', 'ambiental', 'residuo', 'basura', 'hoja'] },
+  { label: 'Comercio', description: 'Actividad comercial local.', icon: 'store', color: '#f97316', markerType: 'commerce', keywords: ['comercio', 'tienda', 'negocio', 'venta'] },
+  { label: 'Riesgo', description: 'Amenazas, emergencias o deslizamientos.', icon: 'alert', color: '#dc2626', markerType: 'risk', keywords: ['riesgo', 'desliz', 'incendio', 'emergencia'] },
+  { label: 'Ruido', description: 'Contaminación auditiva.', icon: 'sound', color: '#f59e0b', markerType: 'noise', keywords: ['ruido', 'sonido', 'contaminacion auditiva', 'contaminación auditiva'] },
+  { label: 'Alumbrado', description: 'Iluminación y postes.', icon: 'light', color: '#eab308', markerType: 'lighting', keywords: ['alumbrado', 'luz', 'poste', 'iluminacion', 'iluminación'] }
 ];
 
 const ANNOTATION_MARKER_FALLBACK: AnnotationMarkerConfig = {
   icon: 'pin',
-  color: '#f59e0b',
+  color: '#64748b',
   markerType: 'other'
 };
 
@@ -369,16 +370,6 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
             <div class="map-view__title">
               Mapa | {{ currentMapMode === 'officials' ? 'Funcionarios' : 'Anotaciones' }}
             </div>
-            <div class="map-legend" aria-label="Convenciones del mapa">
-              <div class="legend-item legend-item--entity">
-                <span class="legend-dot legend-dot--entity"></span>
-                <span>Entidad</span>
-              </div>
-              <div class="legend-item legend-item--annotation">
-                <span class="legend-dot legend-dot--annotation"></span>
-                <span>Anotación</span>
-              </div>
-            </div>
           </div>
 
           <div class="map-floating-legend" *ngIf="currentMapMode === 'officials'">
@@ -392,6 +383,23 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
             No hay funcionarios activos en la entidad filtrada.
           </p>
           <div #mapContainer class="leaflet-container" [class.annotation-cursor]="isAnnotationMode"></div>
+          <section class="annotation-style-legend" *ngIf="currentMapMode === 'annotations'" aria-label="Convenciones de categorías">
+            <h4>Dibujos y colores de anotaciones</h4>
+            <p class="annotation-style-legend__hint">
+              Cada marcador representa la categoría principal: color + icono (dibujo) se mantienen consistentes en mapa y detalle.
+            </p>
+            <div class="annotation-style-legend__grid">
+              <article class="annotation-style-item" *ngFor="let item of annotationMarkerLegend; trackBy: trackMarkerLegend">
+                <span class="annotation-style-item__marker" [style.background]="item.color">
+                  <span class="annotation-style-item__glyph" [innerHTML]="getMarkerLegendSvg(item.icon)"></span>
+                </span>
+                <div class="annotation-style-item__content">
+                  <strong>{{ item.label }}</strong>
+                  <small>{{ item.description }}</small>
+                </div>
+              </article>
+            </div>
+          </section>
         </section>
 
         <app-annotation-detail-panel
@@ -503,7 +511,7 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     `.category-count { font-size: 0.78rem; color: var(--color-ink-muted, #6b7280); margin-left: auto; }`,
     `.map-info-message { margin: 0; color: var(--color-ink-muted, #6b7280); font-size: 0.9rem; }`,
     `select { width: 100%; border: 1px solid var(--color-border); border-radius: 12px; background: white; color: var(--color-ink); font: inherit; padding: 0.8rem 0.85rem; }`,
-    `.map-view { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: #fff; overflow: hidden; position: relative; display: grid; grid-template-rows: auto 1fr; }`,
+    `.map-view { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: #fff; overflow: hidden; position: relative; display: grid; grid-template-rows: auto 1fr auto; }`,
     `.map-view__header { border-bottom: 1px solid #e2e8f0; background: #f8fafc; padding: 0.55rem 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }`,
     `.map-view__title { font-size: 0.84rem; font-weight: 800; color: #334155; }`,
     `.map-legend { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }`,
@@ -534,7 +542,23 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     `.rt-item__meta { display: grid; text-align: right; }`,
     `.rt-item__meta small { font-size: 0.72rem; color: #64748b; }`,
     `.map-point-marker { width: 16px; height: 16px; border: 2px solid #ffffff; border-radius: 50%; background: var(--color-danger); box-shadow: 0 0 0 5px rgba(239, 35, 60, 0.16); }`,
-    `.map-annotation-marker { width: 20px; height: 20px; border: 2px solid #fff; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 5px rgba(245, 158, 11, 0.25); }`,
+    `.map-annotation-marker { background: transparent; border: none; }`,
+    `.annotation-pin { position: relative; width: 34px; height: 44px; display: block; filter: drop-shadow(0 8px 12px rgba(15, 23, 42, 0.22)); transform-origin: center bottom; transition: transform 120ms ease-out; }`,
+    `.leaflet-marker-icon.map-annotation-marker:hover .annotation-pin { transform: translateY(-1px) scale(1.03); }`,
+    `.annotation-pin__body { position: absolute; inset: 0; }`,
+    `.annotation-pin__tail { position: absolute; left: 50%; bottom: -1px; width: 10px; height: 10px; transform: translateX(-50%) rotate(45deg); background: var(--pin-color, #64748b); border-right: 2px solid #fff; border-bottom: 2px solid #fff; border-radius: 1px; }`,
+    `.annotation-pin__center { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; }`,
+    `.annotation-style-legend { border-top: 1px solid #e2e8f0; padding: 0.65rem 0.8rem; background: #f8fafc; display: grid; gap: 0.5rem; }`,
+    `.annotation-style-legend h4 { margin: 0; font-size: 0.82rem; color: #0f172a; }`,
+    `.annotation-style-legend__hint { margin: 0; font-size: 0.74rem; color: #64748b; }`,
+    `.annotation-style-legend__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.45rem 0.75rem; }`,
+    `.annotation-style-item { display: flex; align-items: center; gap: 0.45rem; min-height: 36px; }`,
+    `.annotation-style-item__marker { width: 24px; height: 24px; border-radius: 999px; border: 2px solid #fff; box-shadow: 0 4px 10px rgba(15, 23, 42, 0.2); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 0.78rem; flex-shrink: 0; }`,
+    `.annotation-style-item__glyph { display: inline-flex; align-items: center; justify-content: center; line-height: 1; }`,
+    `.annotation-style-item__glyph svg { width: 12px; height: 12px; display: block; }`,
+    `.annotation-style-item__content { display: grid; gap: 0.05rem; }`,
+    `.annotation-style-item__content strong { font-size: 0.75rem; color: #1f2937; }`,
+    `.annotation-style-item__content small { font-size: 0.7rem; color: #64748b; line-height: 1.25; }`,
     `.official-marker {
       width: 42px;
       height: 42px;
@@ -566,7 +590,7 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
     }`,
     `.annotation-cursor, .annotation-cursor .leaflet-interactive { cursor: crosshair !important; }`,
     `.annotation-mode-hint { color: var(--color-primary); font-weight: 500; }`,
-    `@media (max-width: 1240px) { .rt-toolbar { grid-template-columns: 1fr; } .rt-main { grid-template-columns: 1fr; } .rt-main--annotations { grid-template-columns: 1fr; } .rt-main--annotations-with-detail { grid-template-columns: 1fr; } .rt-stats { grid-template-columns: repeat(3, 1fr); } .map-floating-legend { left: 12px; right: auto; bottom: 12px; top: auto; } }`,
+    `@media (max-width: 1240px) { .rt-toolbar { grid-template-columns: 1fr; } .rt-main { grid-template-columns: 1fr; } .rt-main--annotations { grid-template-columns: 1fr; } .rt-main--annotations-with-detail { grid-template-columns: 1fr; } .rt-stats { grid-template-columns: repeat(3, 1fr); } .map-floating-legend { left: 12px; right: auto; bottom: 12px; top: auto; } .annotation-style-legend__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }`,
     `@media (max-width: 980px) { .map-sidebar--annotations { max-height: none; } }`,
 
     `.ann-form { display: grid; gap: 1rem; padding: 1.25rem 1.5rem 1.5rem; }`,
@@ -588,6 +612,7 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
   ],
 })
 export class MapComponent implements AfterViewInit, OnDestroy {
+  readonly annotationMarkerLegend = ANNOTATION_MARKER_RULES;
   @ViewChild('mapContainer', { static: true }) private readonly mapContainer!: ElementRef<HTMLDivElement>;
 
   // ── Map services ──────────────────────────────────────────────────────────
@@ -1787,16 +1812,18 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  getMarkerLegendSvg(icon: string): string {
+    return this.getAnnotationMarkerIconSvg(icon);
+  }
+
+  trackMarkerLegend(_: number, item: AnnotationMarkerRule): string {
+    return item.markerType;
+  }
+
   private buildPinMarkerHtml(color: string, iconSvg: string): string {
     return `
-      <div style="
-        width: 36px;
-        height: 48px;
-        position: relative;
-        transform: translate(-2px, -10px);
-        filter: drop-shadow(0 8px 12px rgba(15, 23, 42, 0.28));
-      ">
-        <svg viewBox="0 0 36 48" width="36" height="48" style="display:block;">
+      <div class="annotation-pin" style="--pin-color:${color}">
+        <svg class="annotation-pin__body" viewBox="0 0 36 48" width="36" height="48" style="display:block;">
           <path
             d="M18 2C10.3 2 4 8.2 4 15.9c0 10.5 11.3 22.6 13.3 24.7a1 1 0 0 0 1.4 0C20.7 38.5 32 26.4 32 15.9 32 8.2 25.7 2 18 2Z"
             fill="${color}"
@@ -1804,17 +1831,8 @@ export class MapComponent implements AfterViewInit, OnDestroy {
             stroke-width="2"
           />
         </svg>
-        <div style="
-          position: absolute;
-          top: 9px;
-          left: 50%;
-          transform: translateX(-50%);
-          width: 18px;
-          height: 18px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        ">
+        <span class="annotation-pin__tail"></span>
+        <div class="annotation-pin__center">
           ${iconSvg}
         </div>
       </div>
@@ -2192,7 +2210,11 @@ export class MapComponent implements AfterViewInit, OnDestroy {
         const marker = L.marker([point.latitude, point.longitude], {
           icon: L.divIcon({
             className: 'map-annotation-marker',
-            html: this.buildAnnotationMarkerHtml(markerConfig)
+            html: this.buildAnnotationMarkerHtml(markerConfig),
+            iconSize: [34, 44],
+            iconAnchor: [17, 44],
+            popupAnchor: [0, -34],
+            tooltipAnchor: [0, -30]
           }),
           draggable: false
         });
