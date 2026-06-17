@@ -250,7 +250,15 @@ export class NeighborhoodsListGenericComponent implements OnInit {
           continue;
         }
 
-        const filterParam = { [check.paramField]: neighborhood[this.config.idField as keyof Neighborhood] as number };
+        const neighborhoodId = neighborhood[this.config.idField as keyof Neighborhood] as number;
+        
+        // Validar que el ID del barrio sea válido antes de hacer la búsqueda
+        if (!neighborhoodId || neighborhoodId <= 0) {
+          results.push({ hasDependencies: false, message: '' });
+          continue;
+        }
+
+        const filterParam = { [check.paramField]: neighborhoodId };
 
         const hasDependencies = await service
           .listCollection(filterParam)
@@ -265,7 +273,13 @@ export class NeighborhoodsListGenericComponent implements OnInit {
             .toPromise()
             .then((collection: any) => collection.items || []);
 
-          const itemsList = dependentItems.map((item: any) => item.name || item.description || item.id).join(', ');
+          // Filtrar solo items que realmente tienen el ID del barrio correcto
+          const trulyDependentItems = dependentItems.filter((item: any) => {
+            const itemId = item[check.paramField];
+            return itemId === neighborhoodId;
+          });
+
+          const itemsList = trulyDependentItems.map((item: any) => item.name || item.description || item.id).join(', ');
 
           // Solo agregar mensaje si hay items dependientes reales
           if (itemsList && itemsList.trim() !== '') {

@@ -493,6 +493,22 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
     idField: 'id_neighborhood',
     hasFile: false,
     searchEndpoint: 'neighborhoods/search',
+    // CU-06 E2, E2a: Validación de dependencias antes de eliminar barrio.
+    // Verifica que el barrio no tenga puntos (demarcaciones) ni anotaciones asociadas.
+    dependencyChecks: [
+      {
+        service: 'PointCrudService',
+        endpoint: 'points',
+        paramField: 'id_neighborhood',
+        warningMessage: 'Existen puntos/demarcaciones asociados a este barrio'
+      },
+      {
+        service: 'AnnotationCrudService',
+        endpoint: 'annotations',
+        paramField: 'id_neighborhood',
+        warningMessage: 'Existen anotaciones asociadas a este barrio'
+      }
+    ],
     columns: [
       { key: 'name', header: 'Nombre' },
       { key: 'commune_name', header: 'Comuna', emptyValue: '—' },
