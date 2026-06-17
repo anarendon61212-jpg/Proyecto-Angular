@@ -4,7 +4,7 @@ import { FormControl, FormGroup, FormsModule, ReactiveFormsModule } from '@angul
 import { Router } from '@angular/router';
 import * as L from 'leaflet';
 import { combineLatest, forkJoin, Observable, of, Subject, Subscription, take, takeUntil } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { catchError, map, switchMap } from 'rxjs/operators';
 
 import {
   Annotation,
@@ -38,6 +38,7 @@ import {
   VoteCrudService
 } from '../../core/api/territorial-crud.services';
 import { ApiClient } from '../../core/api/api-client.service';
+import { CATEGORY_STYLE_RULES, CategoryStyleRule } from '../../core/config/category-style.config';
 import { ToastService } from '../../shared/services/toast.service';
 import { TrackingService } from '../../core/services/tracking.service';
 import { AuthService } from '../../core/auth/auth.service';
@@ -116,33 +117,10 @@ interface AnnotationMarkerConfig {
   markerType: string;
 }
 
-interface AnnotationMarkerRule {
-  label: string;
-  description: string;
-  icon: string;
-  color: string;
-  markerType: string;
-  keywords: string[];
-}
-
-const ANNOTATION_MARKER_RULES: AnnotationMarkerRule[] = [
-  { label: 'Infraestructura', description: 'Vías, andenes y daños físicos.', icon: 'cone', color: '#ef4444', markerType: 'infrastructure', keywords: ['infraestructura', 'road', 'via', 'calle', 'carretera', 'ande'] },
-  { label: 'Movilidad', description: 'Tránsito y transporte público.', icon: 'bus', color: '#3b82f6', markerType: 'mobility', keywords: ['movilidad', 'trafico', 'tránsito', 'bus', 'transporte'] },
-  { label: 'Seguridad', description: 'Riesgos de seguridad ciudadana.', icon: 'shield', color: '#7c3aed', markerType: 'security', keywords: ['seguridad', 'alarma', 'alerta', 'delito', 'policia'] },
-  { label: 'Salud', description: 'Eventos y alertas sanitarias.', icon: 'cross', color: '#22c55e', markerType: 'health', keywords: ['salud', 'hospital', 'medic', 'medicina'] },
-  { label: 'Educación', description: 'Entorno educativo y acceso.', icon: 'book', color: '#0ea5e9', markerType: 'education', keywords: ['educacion', 'educación', 'colegio', 'escuela', 'universidad'] },
-  { label: 'Espacio público', description: 'Parques, mobiliario y uso común.', icon: 'tree', color: '#16a34a', markerType: 'public-space', keywords: ['espacio publico', 'espacio público', 'parque'] },
-  { label: 'Medio ambiente', description: 'Residuos, flora y ecosistema.', icon: 'leaf', color: '#10b981', markerType: 'environment', keywords: ['medio ambiente', 'ambiental', 'residuo', 'basura', 'hoja'] },
-  { label: 'Comercio', description: 'Actividad comercial local.', icon: 'store', color: '#f97316', markerType: 'commerce', keywords: ['comercio', 'tienda', 'negocio', 'venta'] },
-  { label: 'Riesgo', description: 'Amenazas, emergencias o deslizamientos.', icon: 'alert', color: '#dc2626', markerType: 'risk', keywords: ['riesgo', 'desliz', 'incendio', 'emergencia'] },
-  { label: 'Ruido', description: 'Contaminación auditiva.', icon: 'sound', color: '#f59e0b', markerType: 'noise', keywords: ['ruido', 'sonido', 'contaminacion auditiva', 'contaminación auditiva'] },
-  { label: 'Alumbrado', description: 'Iluminación y postes.', icon: 'light', color: '#eab308', markerType: 'lighting', keywords: ['alumbrado', 'luz', 'poste', 'iluminacion', 'iluminación'] }
-];
-
 const ANNOTATION_MARKER_FALLBACK: AnnotationMarkerConfig = {
-  icon: 'pin',
-  color: '#64748b',
-  markerType: 'other'
+  icon: CATEGORY_STYLE_RULES[0]?.icon ?? 'pin',
+  color: CATEGORY_STYLE_RULES[0]?.color ?? '#ef4444',
+  markerType: CATEGORY_STYLE_RULES[0]?.markerType ?? 'infrastructure'
 };
 
 const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
@@ -612,7 +590,7 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
   ],
 })
 export class MapComponent implements AfterViewInit, OnDestroy {
-  readonly annotationMarkerLegend = ANNOTATION_MARKER_RULES;
+  readonly annotationMarkerLegend = CATEGORY_STYLE_RULES;
   @ViewChild('mapContainer', { static: true }) private readonly mapContainer!: ElementRef<HTMLDivElement>;
 
   // ── Map services ──────────────────────────────────────────────────────────
@@ -689,6 +667,9 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   annotationCategories: Category[] = [];
   annotationEntities: Entity[] = [];
   annotationCitizens: Citizen[] = [];
+  currentAnnotationCitizenId: number | null = null;
+  currentAnnotationCitizenName: string | null = null;
+  private isResolvingCurrentCitizen = false;
   annotationPhotoFiles: File[] = [];
   trackingEntities: Entity[] = [];
   currentMapMode: MapMode = 'officials';
@@ -706,25 +687,12 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   visibleAnnotationCount = 0;
   hasAnnotationPoints = false;
 
-  private readonly defaultAnnotationMarkerStyle = {
-    background: '#f59e0b',
-    shadow: 'rgba(245, 158, 11, 0.25)'
-  };
-  private readonly rootPalette = [
-    { background: '#f59e0b', shadow: 'rgba(245, 158, 11, 0.25)' },
-    { background: '#2563eb', shadow: 'rgba(37, 99, 235, 0.25)' },
-    { background: '#16a34a', shadow: 'rgba(22, 163, 74, 0.25)' },
-    { background: '#dc2626', shadow: 'rgba(220, 38, 38, 0.25)' },
-    { background: '#7c3aed', shadow: 'rgba(124, 58, 237, 0.25)' },
-    { background: '#0891b2', shadow: 'rgba(8, 145, 178, 0.25)' },
-    { background: '#ea580c', shadow: 'rgba(234, 88, 12, 0.25)' }
-  ];
   private allCategories: Category[] = [];
   private allAnnotationCategories: AnnotationCategory[] = [];
   private categoriesById = new Map<number, Category>();
   private categoryChildrenMap = new Map<number | null, Category[]>();
   private categoryDescendantsMap = new Map<number, Set<number>>();
-  private categoryColorMap = new Map<number, { background: string; shadow: string }>();
+  private rootCategoryRuleMap = new Map<number, CategoryStyleRule>();
   private annotationCategoryMap = new Map<number, Set<number>>();
   private annotationDescriptionMap = new Map<number, string>();
 
@@ -1320,13 +1288,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       return;
     }
 
-    const idCitizen = this.annotationForm.controls.id_citizen.value;
     const description = this.annotationForm.controls.description.value?.trim();
-
-    if (!idCitizen) {
-      this.toastService.danger('Campo requerido', 'Debe seleccionar un ciudadano.');
-      return;
-    }
 
     if (!description) {
       this.toastService.danger('Campo requerido', 'Debe escribir una descripción.');
@@ -1349,43 +1311,44 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       return;
     }
 
-    this.isSavingAnnotation = true;
+    const finalizeWithCitizen = (idCitizen: number): void => {
+      this.isSavingAnnotation = true;
 
-    const payload: AnnotationPayload = {
-      id_neighborhood: this.selectedAnnotationLocation.neighborhoodId,
-      id_citizen: Number(idCitizen),
-      description,
-      latitude: lat,
-      longitude: lng,
-      status: 'active'
-    };
+      const payload: AnnotationPayload = {
+        id_neighborhood: this.selectedAnnotationLocation!.neighborhoodId,
+        id_citizen: Number(idCitizen),
+        description,
+        latitude: lat,
+        longitude: lng,
+        status: 'active'
+      };
 
-    this.annotationService.create(payload).pipe(
-      catchError((error) => {
-        const backendMessage = this.extractErrorMessage(error);
-        this.toastService.danger(
-          'Error al crear',
-          backendMessage ? `No se pudo registrar la anotación: ${backendMessage}` : 'No se pudo registrar la anotación. Intente nuevamente.'
-        );
-        this.isSavingAnnotation = false;
-        return of(null);
-      })
-    ).subscribe((annotation) => {
-      if (!annotation) return;
+      this.annotationService.create(payload).pipe(
+        catchError((error) => {
+          const backendMessage = this.extractErrorMessage(error);
+          this.toastService.danger(
+            'Error al crear',
+            backendMessage ? `No se pudo registrar la anotación: ${backendMessage}` : 'No se pudo registrar la anotación. Intente nuevamente.'
+          );
+          this.isSavingAnnotation = false;
+          return of(null);
+        })
+      ).subscribe((annotation) => {
+        if (!annotation) return;
 
-      const categoryIds = this.annotationForm.value.categoryIds ?? [];
-      const entityIds = this.annotationForm.value.interestedEntityIds ?? [];
+        const categoryIds = this.annotationForm.value.categoryIds ?? [];
+        const entityIds = this.annotationForm.value.interestedEntityIds ?? [];
 
-      const tasks: Observable<unknown>[] = [];
-      let optionalTaskFailures = 0;
-      const wrapOptionalTask = (task$: Observable<unknown>): Observable<unknown> =>
-        task$.pipe(
-          catchError((error) => {
-            optionalTaskFailures += 1;
-            console.error('[CU-12] Error en tarea opcional de anotación:', error);
-            return of(null);
-          })
-        );
+        const tasks: Observable<unknown>[] = [];
+        let optionalTaskFailures = 0;
+        const wrapOptionalTask = (task$: Observable<unknown>): Observable<unknown> =>
+          task$.pipe(
+            catchError((error) => {
+              optionalTaskFailures += 1;
+              console.error('[CU-12] Error en tarea opcional de anotación:', error);
+              return of(null);
+            })
+          );
 
       // Point for map display (always first — used to update annotationLayer).
       // id_neighborhood is intentionally omitted: the backend rejects payloads that
@@ -1429,56 +1392,79 @@ export class MapComponent implements AfterViewInit, OnDestroy {
         tasks.push(wrapOptionalTask(this.evidenceService.createForm(fd)));
       }
 
-      forkJoin(tasks).pipe(
-        catchError((error) => {
-          const backendMessage = this.extractErrorMessage(error);
-          this.toastService.danger(
-            'Error al crear punto de mapa',
-            backendMessage
-              ? `La anotación se registró, pero no se pudo crear su punto en el mapa: ${backendMessage}`
-              : 'La anotación se registró, pero no se pudo crear su punto en el mapa.'
-          );
-          this.isSavingAnnotation = false;
-          this.clearAnnotationSelection();
-          return of(null);
-        })
-      ).subscribe((results) => {
-        this.isSavingAnnotation = false;
-
-        if (results) {
-          if (optionalTaskFailures > 0) {
-            this.toastService.warning(
-              'Anotación registrada parcialmente',
-              'La anotación fue guardada y aparece en el mapa, pero algunas asociaciones opcionales no se registraron.'
+        forkJoin(tasks).pipe(
+          catchError((error) => {
+            const backendMessage = this.extractErrorMessage(error);
+            this.toastService.danger(
+              'Error al crear punto de mapa',
+              backendMessage
+                ? `La anotación se registró, pero no se pudo crear su punto en el mapa: ${backendMessage}`
+                : 'La anotación se registró, pero no se pudo crear su punto en el mapa.'
             );
-          } else {
-            this.toastService.success('Anotación registrada', 'La anotación fue guardada y ya aparece en el mapa.');
-          }
+            this.isSavingAnnotation = false;
+            this.clearAnnotationSelection();
+            return of(null);
+          })
+        ).subscribe((results) => {
+          this.isSavingAnnotation = false;
 
-          // Add the new Point (index 0) to this.points and refresh the map immediately
-          const newPoint = results[0] as Point;
-          if (newPoint?.id_point != null) {
-            const newAnnotationId = annotation.id_annotation;
-            const selectedCategories = new Set<number>(categoryIds);
-            this.annotationCategoryMap.set(newAnnotationId, selectedCategories);
-
-            for (const categoryId of categoryIds) {
-              this.allAnnotationCategories.push({
-                id_annotation_category: -(Date.now() + categoryId),
-                id_annotation: newAnnotationId,
-                id_category: categoryId
-              });
+          if (results) {
+            if (optionalTaskFailures > 0) {
+              this.toastService.warning(
+                'Anotación registrada parcialmente',
+                'La anotación fue guardada y aparece en el mapa, pero algunas asociaciones opcionales no se registraron.'
+              );
+            } else {
+              this.toastService.success('Anotación registrada', 'La anotación fue guardada y ya aparece en el mapa.');
             }
-            this.buildCategoryCounts();
 
-            this.points = [...this.points, newPoint];
-            this.annotationDescriptionMap.set(newAnnotationId, description);
-            this.refreshMapLayers();
+            // Add the new Point (index 0) to this.points and refresh the map immediately
+            const newPoint = results[0] as Point;
+            if (newPoint?.id_point != null) {
+              const newAnnotationId = annotation.id_annotation;
+              const selectedCategories = new Set<number>(categoryIds);
+              this.annotationCategoryMap.set(newAnnotationId, selectedCategories);
+
+              for (const categoryId of categoryIds) {
+                this.allAnnotationCategories.push({
+                  id_annotation_category: -(Date.now() + categoryId),
+                  id_annotation: newAnnotationId,
+                  id_category: categoryId
+                });
+              }
+              this.buildCategoryCounts();
+
+              this.points = [...this.points, newPoint];
+              this.annotationDescriptionMap.set(newAnnotationId, description);
+              this.refreshMapLayers();
+            }
           }
-        }
 
-        this.clearAnnotationSelection();
+          this.clearAnnotationSelection();
+        });
       });
+    };
+
+    if (this.currentAnnotationCitizenId) {
+      finalizeWithCitizen(this.currentAnnotationCitizenId);
+      return;
+    }
+
+    if (this.isResolvingCurrentCitizen) {
+      return;
+    }
+
+    this.isResolvingCurrentCitizen = true;
+    this.ensureCurrentAnnotationCitizenId().pipe(take(1)).subscribe((resolvedCitizenId) => {
+      this.isResolvingCurrentCitizen = false;
+      if (!resolvedCitizenId) {
+        this.toastService.danger(
+          'Ciudadano no vinculado',
+          'No se pudo resolver automáticamente tu ciudadano para crear la anotación.'
+        );
+        return;
+      }
+      finalizeWithCitizen(resolvedCitizenId);
     });
   }
 
@@ -1550,7 +1536,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
 
   private resetAnnotationForm(): void {
     this.annotationForm.reset({
-      id_citizen: null,
+      id_citizen: this.currentAnnotationCitizenId,
       description: '',
       categoryIds: [],
       interestedEntityIds: []
@@ -1573,7 +1559,81 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       this.annotationCategories = categories.items;
       this.annotationEntities = entities.items;
       this.annotationCitizens = citizens.items;
+      this.resolveCurrentAnnotationCitizen(citizens.items);
     });
+  }
+
+  private resolveCurrentAnnotationCitizen(citizens: Citizen[]): void {
+    const currentUser = this.authService.currentUser();
+    if (!currentUser) {
+      this.currentAnnotationCitizenId = null;
+      this.currentAnnotationCitizenName = null;
+      this.annotationForm.controls.id_citizen.setValue(null, { emitEvent: false });
+      return;
+    }
+
+    const normalizedEmail = currentUser.email?.trim().toLowerCase() ?? '';
+    const normalizedName = currentUser.name?.trim().toLowerCase() ?? '';
+
+    const byEmail = normalizedEmail
+      ? citizens.find((citizen) => citizen.email?.trim().toLowerCase() === normalizedEmail) ?? null
+      : null;
+    const bySameId = citizens.find((citizen) => citizen.id_citizen === currentUser.id) ?? null;
+    const byNameCandidates = normalizedName
+      ? citizens.filter((citizen) => citizen.name?.trim().toLowerCase() === normalizedName)
+      : [];
+    const byUniqueName = byNameCandidates.length === 1 ? byNameCandidates[0] : null;
+
+    const matchedCitizen = byEmail ?? bySameId ?? byUniqueName;
+    this.currentAnnotationCitizenId = matchedCitizen?.id_citizen ?? null;
+    this.currentAnnotationCitizenName = matchedCitizen?.name ?? currentUser?.name ?? null;
+    this.annotationForm.controls.id_citizen.setValue(this.currentAnnotationCitizenId, { emitEvent: false });
+  }
+
+  private ensureCurrentAnnotationCitizenId(): Observable<number | null> {
+    if (this.currentAnnotationCitizenId) {
+      return of(this.currentAnnotationCitizenId);
+    }
+
+    const currentUser = this.authService.currentUser();
+    if (!currentUser?.email) {
+      return of(null);
+    }
+    const currentUserEmail = currentUser.email.trim();
+
+    const normalizedEmail = currentUserEmail.toLowerCase();
+
+    return this.citizenService.listCollection().pipe(
+      map((response) =>
+        response.items.find((citizen) => citizen.email?.trim().toLowerCase() === normalizedEmail) ?? null
+      ),
+      switchMap((matchedCitizen) => {
+        if (matchedCitizen) {
+          this.currentAnnotationCitizenId = matchedCitizen.id_citizen;
+          this.currentAnnotationCitizenName = matchedCitizen.name ?? currentUser.name ?? null;
+          this.annotationForm.controls.id_citizen.setValue(matchedCitizen.id_citizen, { emitEvent: false });
+          return of(matchedCitizen.id_citizen);
+        }
+
+        const payload = {
+          name: currentUser.name?.trim() || 'Ciudadano',
+          email: currentUserEmail,
+          status: 'active' as const
+        };
+
+        return this.citizenService.create(payload).pipe(
+          map((createdCitizen) => {
+            this.annotationCitizens = [...this.annotationCitizens, createdCitizen];
+            this.currentAnnotationCitizenId = createdCitizen.id_citizen;
+            this.currentAnnotationCitizenName = createdCitizen.name ?? currentUser.name ?? null;
+            this.annotationForm.controls.id_citizen.setValue(createdCitizen.id_citizen, { emitEvent: false });
+            return createdCitizen.id_citizen;
+          }),
+          catchError(() => of(null))
+        );
+      }),
+      catchError(() => of(null))
+    );
   }
 
   private loadCategoryFilterData(): Observable<{
@@ -1686,14 +1746,26 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   }
 
   private buildCategoryColorMap(): void {
-    this.categoryColorMap.clear();
+    this.rootCategoryRuleMap.clear();
     const roots = this.categoryChildrenMap.get(null) ?? [];
+    const consumedRuleTypes = new Set<string>();
     roots
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
-      .forEach((root, index) => {
-        const palette = this.rootPalette[index % this.rootPalette.length];
-        this.categoryColorMap.set(root.id_category, palette);
+      .forEach((root) => {
+        const explicitRule = this.findBestRuleForTerms([root.name, root.description ?? '']);
+        if (explicitRule) {
+          this.rootCategoryRuleMap.set(root.id_category, explicitRule);
+          consumedRuleTypes.add(explicitRule.markerType);
+          return;
+        }
+
+        const fallbackRule = CATEGORY_STYLE_RULES.find((rule) => !consumedRuleTypes.has(rule.markerType))
+          ?? CATEGORY_STYLE_RULES[0];
+        if (fallbackRule) {
+          this.rootCategoryRuleMap.set(root.id_category, fallbackRule);
+          consumedRuleTypes.add(fallbackRule.markerType);
+        }
       });
   }
 
@@ -1727,33 +1799,114 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   private getAnnotationMarkerConfigForAnnotation(annotationId: number | null | undefined): AnnotationMarkerConfig {
     if (annotationId == null) return ANNOTATION_MARKER_FALLBACK;
     const categoryIds = this.annotationCategoryMap.get(annotationId);
-    if (!categoryIds || categoryIds.size === 0) return ANNOTATION_MARKER_FALLBACK;
+    const annotationDescription = this.annotationDescriptionMap.get(annotationId) ?? '';
+    if (!categoryIds || categoryIds.size === 0) {
+      return this.getAnnotationMarkerConfig([], annotationDescription);
+    }
 
     const categories = Array.from(categoryIds)
       .map((categoryId) => this.categoriesById.get(categoryId))
       .filter((category): category is Category => category != null);
-    return this.getAnnotationMarkerConfig(categories);
+    return this.getAnnotationMarkerConfig(categories, annotationDescription);
   }
 
-  private getAnnotationMarkerConfig(categories: Category[]): AnnotationMarkerConfig {
-    const terms = categories
-      .flatMap((category) => {
-        const related = [category.name];
-        if (category.id_parent_category != null) {
-          const parent = this.categoriesById.get(category.id_parent_category);
-          if (parent) related.push(parent.name);
-        }
-        return related;
-      })
-      .map((value) => this.normalizeSearchTerm(value));
-
-    for (const rule of ANNOTATION_MARKER_RULES) {
-      const matches = rule.keywords.some((keyword) => terms.some((term) => term.includes(this.normalizeSearchTerm(keyword))));
-      if (matches) {
-        return { icon: rule.icon, color: rule.color, markerType: rule.markerType };
+  private getAnnotationMarkerConfig(categories: Category[], annotationDescription = ''): AnnotationMarkerConfig {
+    const rootCategory = this.resolvePrimaryRootCategory(categories);
+    if (rootCategory) {
+      const mappedRule = this.rootCategoryRuleMap.get(rootCategory.id_category)
+        ?? this.getDeterministicRuleForRoot(rootCategory.id_category);
+      if (mappedRule) {
+        return { icon: mappedRule.icon, color: mappedRule.color, markerType: mappedRule.markerType };
       }
     }
+
+    const terms = this.collectCategoryTerms(categories, annotationDescription);
+    const directRule = this.findBestRuleForTerms(terms);
+    if (directRule) {
+      return { icon: directRule.icon, color: directRule.color, markerType: directRule.markerType };
+    }
+
     return ANNOTATION_MARKER_FALLBACK;
+  }
+
+  private collectCategoryTerms(categories: Category[], annotationDescription: string): string[] {
+    const terms: string[] = [];
+    for (const category of categories) {
+      terms.push(category.name, category.description ?? '');
+      const parent = this.resolveRootCategory(category);
+      if (parent) {
+        terms.push(parent.name, parent.description ?? '');
+      }
+    }
+    if (annotationDescription) {
+      terms.push(annotationDescription);
+    }
+    return terms;
+  }
+
+  private findBestRuleForTerms(rawTerms: string[]): CategoryStyleRule | null {
+    const normalizedTerms = rawTerms
+      .map((value) => this.normalizeSearchTerm(value))
+      .filter((value) => value.length > 0);
+
+    let bestRule: CategoryStyleRule | null = null;
+    let bestScore = 0;
+    for (const rule of CATEGORY_STYLE_RULES) {
+      const normalizedLabel = this.normalizeSearchTerm(rule.label);
+      const normalizedDescription = this.normalizeSearchTerm(rule.description);
+      let score = 0;
+
+      for (const term of normalizedTerms) {
+        if (term.includes(normalizedLabel) || normalizedLabel.includes(term)) {
+          score += 6;
+        }
+        if (normalizedDescription && term.includes(normalizedDescription)) {
+          score += 4;
+        }
+        for (const keyword of rule.keywords) {
+          const normalizedKeyword = this.normalizeSearchTerm(keyword);
+          if (!normalizedKeyword) continue;
+          if (term.includes(normalizedKeyword) || normalizedKeyword.includes(term)) {
+            score += 3;
+          }
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestRule = rule;
+      }
+    }
+
+    return bestScore > 0 ? bestRule : null;
+  }
+
+  private resolveRootCategory(category: Category): Category | null {
+    let current: Category | undefined = category;
+    let guard = 0;
+    while (current && current.id_parent_category != null && guard < 25) {
+      current = this.categoriesById.get(current.id_parent_category);
+      guard += 1;
+    }
+    return current ?? null;
+  }
+
+  private resolvePrimaryRootCategory(categories: Category[]): Category | null {
+    const firstCategory = categories[0];
+    if (!firstCategory) return null;
+    return this.resolveRootCategory(firstCategory);
+  }
+
+  private getDeterministicRuleForRoot(rootCategoryId: number): CategoryStyleRule | null {
+    if (CATEGORY_STYLE_RULES.length === 0) return null;
+    const roots = (this.categoryChildrenMap.get(null) ?? [])
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const rootIndex = roots.findIndex((root) => root.id_category === rootCategoryId);
+    if (rootIndex < 0) {
+      return CATEGORY_STYLE_RULES[Math.abs(rootCategoryId) % CATEGORY_STYLE_RULES.length];
+    }
+    return CATEGORY_STYLE_RULES[rootIndex % CATEGORY_STYLE_RULES.length];
   }
 
   private normalizeSearchTerm(value: string | null | undefined): string {
@@ -1816,7 +1969,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     return this.getAnnotationMarkerIconSvg(icon);
   }
 
-  trackMarkerLegend(_: number, item: AnnotationMarkerRule): string {
+  trackMarkerLegend(_: number, item: CategoryStyleRule): string {
     return item.markerType;
   }
 

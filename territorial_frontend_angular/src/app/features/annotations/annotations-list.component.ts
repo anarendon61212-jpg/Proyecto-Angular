@@ -2,8 +2,8 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectionStrategy, Component, inject, ChangeDetectorRef } from '@angular/core';
 import { FormControl, FormGroup, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
-import { forkJoin, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { forkJoin, Observable, of } from 'rxjs';
+import { catchError, map, switchMap } from 'rxjs/operators';
 
 import { AuthService } from '../../core/auth/auth.service';
 
@@ -14,6 +14,7 @@ import {
   AnnotationPayload,
   Category,
   Citizen,
+  CitizenPayload,
   Evidence,
   Entity,
   InterestedParty,
@@ -59,10 +60,11 @@ import { normalizeStatus } from '../../core/utils/status.utils';
           <div class="form-grid">
             <label>
               Ciudadano
-              <select formControlName="id_citizen">
-                <option value="">Seleccione ciudadano</option>
-                <option *ngFor="let citizen of citizens" [value]="citizen.id_citizen">{{ citizen.name }}</option>
-              </select>
+              <input
+                type="text"
+                [value]="currentAnnotationAuthorName || 'Sin ciudadano vinculado'"
+                readonly
+              />
             </label>
 
             <label>
@@ -93,6 +95,9 @@ import { normalizeStatus } from '../../core/utils/status.utils';
               <input type="number" step="0.000001" formControlName="longitude" [readonly]="isLocationPrefilledFromMap" />
             </label>
           </div>
+          <p *ngIf="canCreateAnnotations() && !currentAnnotationAuthorId" class="prefill-hint">
+            Tu cuenta no está vinculada a un ciudadano. No podrás crear anotaciones hasta completar esa vinculación.
+          </p>
           <p *ngIf="isLocationPrefilledFromMap" class="prefill-hint">
             Ubicación tomada desde el mapa: {{ prefilledNeighborhoodName || 'Barrio seleccionado' }} ({{ annotationForm.controls.latitude.value }}, {{ annotationForm.controls.longitude.value }}).
           </p>
@@ -324,6 +329,9 @@ export class AnnotationsListComponent {
   currentUserVote: Vote | null = null;
   isLocationPrefilledFromMap = false;
   prefilledNeighborhoodName: string | null = null;
+  currentAnnotationAuthorId: number | null = null;
+  currentAnnotationAuthorName: string | null = null;
+  private isResolvingCurrentCitizen = false;
 
   filters = {
     search: '',
@@ -413,17 +421,10 @@ export class AnnotationsListComponent {
       return;
     }
 
-    const idCitizen = this.annotationForm.controls.id_citizen.value;
     const neighborhoodId = this.annotationForm.controls.id_neighborhood.value;
     const description = this.annotationForm.controls.description.value;
     const latitude = this.annotationForm.controls.latitude.value;
     const longitude = this.annotationForm.controls.longitude.value;
-
-    // Validate required fields
-    if (!idCitizen) {
-      this.toastService.danger('Campo requerido', 'Debe seleccionar un ciudadano.');
-      return;
-    }
 
     if (!description?.trim()) {
       this.toastService.danger('Campo requerido', 'Debe escribir una descripción.');
@@ -457,87 +458,111 @@ export class AnnotationsListComponent {
       return;
     }
 
-    const payload: AnnotationPayload = {
-      id_neighborhood: Number(neighborhoodId),
-      id_citizen: Number(idCitizen),
-      description: description.trim(),
-      latitude: Number(latitude),
-      longitude: Number(longitude),
-      status: normalizeStatus(this.annotationForm.controls.status.value)
-    };
-
-    this.annotationService.create(payload).pipe(
-      catchError((error) => {
-        this.toastService.danger('Error al crear anotación', 'Intente nuevamente.');
-        return of(null);
-      })
-    ).subscribe((annotation) => {
-      if (!annotation) {
-        return;
-      }
-
-      this.pointService.create({
-        id_annotation: annotation.id_annotation,
+    const finalizeWithCitizen = (idCitizen: number): void => {
+      const payload: AnnotationPayload = {
+        id_neighborhood: Number(neighborhoodId),
+        id_citizen: Number(idCitizen),
+        description: description.trim(),
         latitude: Number(latitude),
         longitude: Number(longitude),
-        point_type: 'annotation'
-      }).pipe(
-        catchError(() => {
-          this.toastService.warning(
-            'Anotación creada parcialmente',
-            'La anotación fue creada, pero no se pudo crear el indicador naranja en el mapa.'
-          );
-          this.resetForm();
-          this.loadData();
+        status: normalizeStatus(this.annotationForm.controls.status.value)
+      };
+
+      this.annotationService.create(payload).pipe(
+        catchError((error) => {
+          this.toastService.danger('Error al crear anotación', 'Intente nuevamente.');
           return of(null);
         })
-      ).subscribe((point) => {
-        if (!point) {
+      ).subscribe((annotation) => {
+        if (!annotation) {
           return;
         }
 
-      const tasks = [] as Array<import('rxjs').Observable<unknown>>;
-      const categoryIds = this.annotationForm.value.categoryIds ?? [];
-      const entityIds = this.annotationForm.value.interestedEntityIds ?? [];
-
-      for (const categoryId of categoryIds) {
-        const payloadCategory: AnnotationCategoryPayload = {
+        this.pointService.create({
           id_annotation: annotation.id_annotation,
-          id_category: categoryId
-        };
-        tasks.push(this.annotationCategoryService.create(payloadCategory));
-      }
+          latitude: Number(latitude),
+          longitude: Number(longitude),
+          point_type: 'annotation'
+        }).pipe(
+          catchError(() => {
+            this.toastService.warning(
+              'Anotación creada parcialmente',
+              'La anotación fue creada, pero no se pudo crear el indicador naranja en el mapa.'
+            );
+            this.resetForm();
+            this.loadData();
+            return of(null);
+          })
+        ).subscribe((point) => {
+          if (!point) {
+            return;
+          }
 
-      for (const entityId of entityIds) {
-        tasks.push(this.interestedPartyService.create({ id_annotation: annotation.id_annotation, id_entity: entityId }));
-      }
+          const tasks = [] as Array<import('rxjs').Observable<unknown>>;
+          const categoryIds = this.annotationForm.value.categoryIds ?? [];
+          const entityIds = this.annotationForm.value.interestedEntityIds ?? [];
 
-      for (const file of this.photoFiles) {
-        const formData = new FormData();
-        formData.append('id_annotation', String(annotation.id_annotation));
-        formData.append('file', file);
-        formData.append('file_type', file.type || this.inferFileTypeFromName(file.name));
-        formData.append('file_size', String(file.size));
-        tasks.push(this.evidenceService.createForm(formData));
-      }
+          for (const categoryId of categoryIds) {
+            const payloadCategory: AnnotationCategoryPayload = {
+              id_annotation: annotation.id_annotation,
+              id_category: categoryId
+            };
+            tasks.push(this.annotationCategoryService.create(payloadCategory));
+          }
 
-      if (tasks.length === 0) {
-        this.toastService.success('Anotación creada', 'La anotación se agregó correctamente y ya aparece en el mapa.');
-        this.resetForm();
-        return this.loadData();
-      }
+          for (const entityId of entityIds) {
+            tasks.push(this.interestedPartyService.create({ id_annotation: annotation.id_annotation, id_entity: entityId }));
+          }
 
-      forkJoin(tasks)
-        .pipe(catchError(() => {
-          this.toastService.warning('Anotación creada', 'La anotación y su punto en mapa se crearon, pero algunos datos auxiliares no se guardaron completamente.');
-          return of(null);
-        }))
-        .subscribe(() => {
-          this.toastService.success('Anotación creada', 'La anotación y su indicador en el mapa se guardaron correctamente.');
-          this.resetForm();
-          this.loadData();
+          for (const file of this.photoFiles) {
+            const formData = new FormData();
+            formData.append('id_annotation', String(annotation.id_annotation));
+            formData.append('file', file);
+            formData.append('file_type', file.type || this.inferFileTypeFromName(file.name));
+            formData.append('file_size', String(file.size));
+            tasks.push(this.evidenceService.createForm(formData));
+          }
+
+          if (tasks.length === 0) {
+            this.toastService.success('Anotación creada', 'La anotación se agregó correctamente y ya aparece en el mapa.');
+            this.resetForm();
+            return this.loadData();
+          }
+
+          forkJoin(tasks)
+            .pipe(catchError(() => {
+              this.toastService.warning('Anotación creada', 'La anotación y su punto en mapa se crearon, pero algunos datos auxiliares no se guardaron completamente.');
+              return of(null);
+            }))
+            .subscribe(() => {
+              this.toastService.success('Anotación creada', 'La anotación y su indicador en el mapa se guardaron correctamente.');
+              this.resetForm();
+              this.loadData();
+            });
         });
       });
+    };
+
+    if (this.currentAnnotationAuthorId) {
+      finalizeWithCitizen(this.currentAnnotationAuthorId);
+      return;
+    }
+
+    if (this.isResolvingCurrentCitizen) {
+      return;
+    }
+
+    this.isResolvingCurrentCitizen = true;
+    this.ensureCurrentAnnotationAuthorId().subscribe((resolvedCitizenId) => {
+      this.isResolvingCurrentCitizen = false;
+      if (!resolvedCitizenId) {
+        this.toastService.danger(
+          'Ciudadano no vinculado',
+          'No se pudo resolver automáticamente tu ciudadano para crear la anotación.'
+        );
+        return;
+      }
+      finalizeWithCitizen(resolvedCitizenId);
     });
   }
 
@@ -693,6 +718,7 @@ export class AnnotationsListComponent {
       this.neighborhoods = neighborhoods.items;
       this.citizens = citizens.items;
       this.entities = entities.items;
+      this.resolveCurrentAnnotationAuthor(citizens.items);
       this.cdr.markForCheck();
     });
   }
@@ -700,7 +726,7 @@ export class AnnotationsListComponent {
   private resetForm(): void {
     this.annotationForm.reset({
       id_neighborhood: null,
-      id_citizen: null,
+      id_citizen: this.currentAnnotationAuthorId,
       description: '',
       latitude: null,
       longitude: null,
@@ -712,6 +738,79 @@ export class AnnotationsListComponent {
     this.isLocationPrefilledFromMap = false;
     this.prefilledNeighborhoodName = null;
     this.annotationForm.controls.id_neighborhood.enable({ emitEvent: false });
+  }
+
+  private resolveCurrentAnnotationAuthor(citizens: Citizen[]): void {
+    const currentUser = this.authService.currentUser();
+    if (!currentUser) {
+      this.currentAnnotationAuthorId = null;
+      this.currentAnnotationAuthorName = null;
+      this.annotationForm.controls.id_citizen.setValue(null, { emitEvent: false });
+      return;
+    }
+
+    const normalizedEmail = currentUser.email?.trim().toLowerCase() ?? '';
+    const normalizedName = currentUser.name?.trim().toLowerCase() ?? '';
+
+    const byEmail = normalizedEmail
+      ? citizens.find((citizen) => citizen.email?.trim().toLowerCase() === normalizedEmail) ?? null
+      : null;
+    const bySameId = citizens.find((citizen) => citizen.id_citizen === currentUser.id) ?? null;
+    const byNameCandidates = normalizedName
+      ? citizens.filter((citizen) => citizen.name?.trim().toLowerCase() === normalizedName)
+      : [];
+    const byUniqueName = byNameCandidates.length === 1 ? byNameCandidates[0] : null;
+
+    const matchedCitizen = byEmail ?? bySameId ?? byUniqueName;
+    this.currentAnnotationAuthorId = matchedCitizen?.id_citizen ?? null;
+    this.currentAnnotationAuthorName = matchedCitizen?.name ?? currentUser?.name ?? null;
+    this.annotationForm.controls.id_citizen.setValue(this.currentAnnotationAuthorId, { emitEvent: false });
+  }
+
+  private ensureCurrentAnnotationAuthorId(): Observable<number | null> {
+    if (this.currentAnnotationAuthorId) {
+      return of(this.currentAnnotationAuthorId);
+    }
+
+    const currentUser = this.authService.currentUser();
+    if (!currentUser?.email) {
+      return of(null);
+    }
+    const currentUserEmail = currentUser.email.trim();
+
+    const normalizedEmail = currentUserEmail.toLowerCase();
+
+    return this.citizenService.listCollection().pipe(
+      map((response) =>
+        response.items.find((citizen) => citizen.email?.trim().toLowerCase() === normalizedEmail) ?? null
+      ),
+      switchMap((matchedCitizen) => {
+        if (matchedCitizen) {
+          this.currentAnnotationAuthorId = matchedCitizen.id_citizen;
+          this.currentAnnotationAuthorName = matchedCitizen.name ?? currentUser.name ?? null;
+          this.annotationForm.controls.id_citizen.setValue(matchedCitizen.id_citizen, { emitEvent: false });
+          return of(matchedCitizen.id_citizen);
+        }
+
+        const payload: CitizenPayload = {
+          name: currentUser.name?.trim() || 'Ciudadano',
+          email: currentUserEmail,
+          status: 'active'
+        };
+
+        return this.citizenService.create(payload).pipe(
+          map((createdCitizen) => {
+            this.citizens = [...this.citizens, createdCitizen];
+            this.currentAnnotationAuthorId = createdCitizen.id_citizen;
+            this.currentAnnotationAuthorName = createdCitizen.name ?? currentUser.name ?? null;
+            this.annotationForm.controls.id_citizen.setValue(createdCitizen.id_citizen, { emitEvent: false });
+            return createdCitizen.id_citizen;
+          }),
+          catchError(() => of(null))
+        );
+      }),
+      catchError(() => of(null))
+    );
   }
 
   private applyMapPrefillFromQueryParams(): void {
