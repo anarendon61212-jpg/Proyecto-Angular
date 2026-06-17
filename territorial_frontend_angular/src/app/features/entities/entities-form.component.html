@@ -123,7 +123,7 @@
     <button
       type="submit"
       class="btn btn-primary"
-      [disabled]="form.invalid || isSubmitting"
+      [disabled]="isSubmitting"
     >
       @if (isSubmitting) {
         Guardando...

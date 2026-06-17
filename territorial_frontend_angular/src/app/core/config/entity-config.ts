@@ -138,8 +138,7 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
         label: 'NIT',
         type: 'text',
         required: true,
-        placeholder: '1234567890',
-        pattern: '^[0-9]+$'
+        placeholder: '900.123.456-7'
       },
       {
         key: 'email',

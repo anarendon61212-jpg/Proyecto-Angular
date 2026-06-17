@@ -66,11 +66,17 @@ export class DataTableComponent<TItem extends object = Record<string, unknown>> 
       return '';
     }
 
-    if (/^(https?:|data:|blob:|\/)/i.test(value)) {
+    if (/^(https?:|data:|blob:)/i.test(value)) {
       return value;
     }
 
-    return `/${value}`;
+    // Si es una ruta relativa, pasarla por el proxy del backend
+    if (/^\//i.test(value)) {
+      return value;
+    }
+
+    // Para URLs relativas sin / inicial, agregar /api/ para pasar por el proxy
+    return `/api/${value}`;
   }
 
   imageAlt(row: TItem, column: DataTableColumn<TItem>): string {

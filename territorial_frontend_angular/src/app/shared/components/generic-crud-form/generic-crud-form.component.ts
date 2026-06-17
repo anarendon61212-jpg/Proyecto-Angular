@@ -55,10 +55,19 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
  
   ngOnInit(): void {
     this.initForm();
-    
+
     // Emit value changes for cascading select logic
     this.form.valueChanges.subscribe((value) => {
       this.valueChanges.emit(value);
+      // Forzar detección de cambios con OnPush cuando el formulario cambia
+      this.cdr.markForCheck();
+    });
+
+    // Marcar controles como touched cuando cambian para mostrar errores de validación
+    Object.keys(this.form.controls).forEach(key => {
+      this.form.get(key)?.valueChanges.subscribe(() => {
+        this.form.get(key)?.markAsTouched();
+      });
     });
   }
  
@@ -96,6 +105,7 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
       const reader = new FileReader();
       reader.onload = (e) => {
         this.previewUrls.set(fieldKey, e.target?.result as string);
+        this.cdr.markForCheck();
       };
       reader.readAsDataURL(files[0]);
     }
@@ -109,9 +119,6 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
   }
  
   async onSubmit(): Promise<void> {
-    if (this.form.invalid) {
-      return;
-    }
  
     this.isSubmitting = true;
     this.duplicateError = '';
@@ -355,7 +362,15 @@ export class GenericCrudFormComponent implements OnInit, OnChanges {
       const fileField = this.config.fields.find((f) => f.key === this.config.fileField);
       const previewField = this.config.filePreviewField || `${this.config.fileField}_url`;
       if (fileField && this.item[previewField]) {
-        this.previewUrls.set(this.config.fileField, this.item[previewField]);
+        const previewUrl = this.item[previewField];
+        // Si es una URL relativa, pasarla por el proxy del backend
+        if (/^(https?:|data:|blob:)/i.test(previewUrl)) {
+          this.previewUrls.set(this.config.fileField, previewUrl);
+        } else if (/^\//i.test(previewUrl)) {
+          this.previewUrls.set(this.config.fileField, previewUrl);
+        } else {
+          this.previewUrls.set(this.config.fileField, `/api/${previewUrl}`);
+        }
       }
     }
 

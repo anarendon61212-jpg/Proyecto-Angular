@@ -37,7 +37,6 @@ import {
   VoteCrudService
 } from '../../core/api/territorial-crud.services';
 import { ApiClient } from '../../core/api/api-client.service';
-import { FileUploadComponent } from '../../shared/components/file-upload/file-upload.component';
 import { ToastService } from '../../shared/services/toast.service';
 import { TrackingService } from '../../core/services/tracking.service';
 import { AnnotationDetailPanelComponent, AnnotationDetailPanelData } from './components/annotation-detail-panel.component';
@@ -177,7 +176,7 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
 @Component({
   selector: 'app-map',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, FileUploadComponent, AnnotationDetailPanelComponent],
+  imports: [CommonModule, FormsModule, ReactiveFormsModule, AnnotationDetailPanelComponent],
   template: `
     <section class="rt-shell app-card">
       <header class="rt-header">

@@ -63,8 +63,27 @@ export class EntitiesFormComponent implements OnInit {
     });
  
     if (entity?.logo_url) {
-      this.previewUrl = entity.logo_url;
+      // Si es una URL relativa, pasarla por el proxy del backend
+      if (/^(https?:|data:|blob:)/i.test(entity.logo_url)) {
+        this.previewUrl = entity.logo_url;
+      } else if (/^\//i.test(entity.logo_url)) {
+        this.previewUrl = entity.logo_url;
+      } else {
+        this.previewUrl = `/api/${entity.logo_url}`;
+      }
     }
+
+    // Forzar detección de cambios con OnPush cuando el formulario cambia
+    this.form.valueChanges.subscribe(() => {
+      this.cdr.markForCheck();
+    });
+
+    // Marcar controles como touched cuando cambian para mostrar errores de validación
+    Object.keys(this.form.controls).forEach(key => {
+      this.form.get(key)?.valueChanges.subscribe(() => {
+        this.form.get(key)?.markAsTouched();
+      });
+    });
   }
  
   onFileSelected(files: File[]): void {
@@ -73,6 +92,7 @@ export class EntitiesFormComponent implements OnInit {
       const reader = new FileReader();
       reader.onload = (e) => {
         this.previewUrl = e.target?.result as string;
+        this.cdr.markForCheck();
       };
       reader.readAsDataURL(this.selectedFile);
     }
@@ -86,9 +106,6 @@ export class EntitiesFormComponent implements OnInit {
   }
  
   async onSubmit(): Promise<void> {
-    if (this.form.invalid) {
-      return;
-    }
  
     this.isSubmitting = true;
     this.duplicateError = '';
