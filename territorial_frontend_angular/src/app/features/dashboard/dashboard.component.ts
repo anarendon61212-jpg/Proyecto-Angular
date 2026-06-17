@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 
-interface DashboardChecklistItem {
+interface DashboardComponentItem {
   icon: string;
   title: string;
   description: string;
@@ -14,21 +14,21 @@ interface DashboardChecklistItem {
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class DashboardComponent {
-  readonly checklist: DashboardChecklistItem[] = [
+  readonly components: DashboardComponentItem[] = [
     {
-      icon: '🧭',
-      title: 'Routing standalone',
-      description: 'Estructura base para cargar módulos funcionales por rutas.'
+      icon: 'MAP',
+      title: 'Componente Espacial',
+      description: 'Demarcar y visualizar el territorio mediante polígonos geoespaciales que definen departamentos, ciudades, comunas y barrios sobre un mapa interactivo.'
     },
     {
-      icon: '🛡️',
-      title: 'Core de seguridad',
-      description: 'Auth local, guards por sesión y roles, token en localStorage.'
+      icon: 'NOTE',
+      title: 'Componente Social',
+      description: 'Registrar anotaciones territoriales —reportes de ciudadanos y funcionarios— categorizadas, geolocalizadas y respaldadas con evidencia fotográfica.'
     },
     {
-      icon: '🔌',
-      title: 'Cliente API',
-      description: 'Wrapper HTTP listo para CRUD, paginación, búsqueda y uploads.'
+      icon: 'COMMUNITY',
+      title: 'Componente Comunitario',
+      description: 'Involucra activamente al ciudadano como agente de reporte y calificación, y a las entidades como partes interesadas en la gestión territorial.'
     }
   ];
 }
