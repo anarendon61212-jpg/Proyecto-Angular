@@ -15,6 +15,7 @@ import {
   Citizen,
   Evidence,
   Entity,
+  InterestedParty,
   Neighborhood,
   Official,
   OfficialTracking,
@@ -57,6 +58,8 @@ interface AnnotationPopupData {
   annotation: Annotation | null;
   evidences: Evidence[];
   categories: Category[];
+  interestedParties: InterestedParty[];
+  interestedEntityNames: string[];
   averageVotes: number | null;
   votesCount: number;
 }
@@ -313,7 +316,11 @@ const NEIGHBORHOOD_SHAPES: NeighborhoodShape[] = [
             <p *ngIf="isAnnotationMode" class="annotation-mode-hint">
               Seleccione un barrio demarcado en el mapa para crear una anotación.
             </p>
+            <p *ngIf="!canCreateAnnotations()" class="map-info-message">
+              Solo ciudadanos y funcionarios pueden crear anotaciones.
+            </p>
             <button
+              *ngIf="canCreateAnnotations()"
               type="button"
               class="app-button"
               [class.app-button--primary]="!isAnnotationMode"
@@ -1187,6 +1194,11 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   // ── CU-12: Annotation mode ─────────────────────────────────────────────────
 
   toggleAnnotationMode(): void {
+    if (!this.canCreateAnnotations()) {
+      this.toastService.warning('Acceso denegado', 'Solo ciudadanos y funcionarios pueden crear anotaciones.');
+      return;
+    }
+
     if (this.isEditingPolygon) {
       // Si el usuario está editando/demarcando, salir de ese modo para no bloquear la anotación.
       this.cancelPolygonEditing();
@@ -1208,6 +1220,11 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   };
 
   openAnnotationFromMap(latlng: L.LatLng): void {
+    if (!this.canCreateAnnotations()) {
+      this.toastService.warning('Acceso denegado', 'Solo ciudadanos y funcionarios pueden crear anotaciones.');
+      return;
+    }
+
     const pendingNeighborhoodId = this.findNeighborhoodForPoint(latlng.lat, latlng.lng);
     if (pendingNeighborhoodId === null) {
       this.toastService.warning(
@@ -1273,6 +1290,11 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   // ── CU-12: Submit annotation ───────────────────────────────────────────────
 
   submitAnnotation(): void {
+    if (!this.canCreateAnnotations()) {
+      this.toastService.warning('Acceso denegado', 'Solo ciudadanos y funcionarios pueden crear anotaciones.');
+      return;
+    }
+
     const idCitizen = this.annotationForm.controls.id_citizen.value;
     const description = this.annotationForm.controls.description.value?.trim();
 
@@ -1377,6 +1399,8 @@ export class MapComponent implements AfterViewInit, OnDestroy {
         const fd = new FormData();
         fd.append('id_annotation', String(annotation.id_annotation));
         fd.append('file', file);
+        fd.append('file_type', file.type || this.inferFileTypeFromName(file.name));
+        fd.append('file_size', String(file.size));
         tasks.push(wrapOptionalTask(this.evidenceService.createForm(fd)));
       }
 
@@ -2200,31 +2224,50 @@ export class MapComponent implements AfterViewInit, OnDestroy {
 
     forkJoin({
       annotation: this.annotationService.getById(annotationId).pipe(catchError(() => of(null))),
-      evidences: this.evidenceService.searchCollection({ id_annotation: annotationId }).pipe(
+      annotationCategories: this.annotationCategoryService.listCollection({ id_annotation: annotationId }).pipe(
+        map((response) => response.items),
+        catchError(() => of([] as AnnotationCategory[]))
+      ),
+      interestedParties: this.interestedPartyService.listCollection({ id_annotation: annotationId }).pipe(
+        map((response) => response.items),
+        catchError(() => of([] as InterestedParty[]))
+      ),
+      evidences: this.evidenceService.listCollection({ id_annotation: annotationId }).pipe(
         map((response) => response.items),
         catchError(() => of([] as Evidence[]))
       ),
-      votes: this.voteService.searchCollection({ id_annotation: annotationId }).pipe(
+      votes: this.voteService.listCollection({ id_annotation: annotationId }).pipe(
         map((response) => response.items),
         catchError(() => of([] as Vote[]))
       )
     })
       .pipe(takeUntil(this.destroy$))
-      .subscribe(({ annotation, evidences, votes }) => {
-        const annotationCategoryIds = this.annotationCategoryMap.get(annotationId) ?? new Set<number>();
+      .subscribe(({ annotation, annotationCategories, interestedParties, evidences, votes }) => {
+        const filteredRelations = annotationCategories.filter((relation) => relation.id_annotation === annotationId);
+        const filteredInterestedParties = interestedParties.filter((party) => party.id_annotation === annotationId);
+        const filteredEvidences = evidences.filter((evidence) => evidence.id_annotation === annotationId);
+        const filteredVotes = votes.filter((vote) => vote.id_annotation === annotationId);
+
+        const relationCategoryIds = filteredRelations.map((relation) => relation.id_category);
+        const fallbackCategoryIds = Array.from(this.annotationCategoryMap.get(annotationId) ?? new Set<number>());
+        const annotationCategoryIds = relationCategoryIds.length > 0 ? relationCategoryIds : fallbackCategoryIds;
         const categories = Array.from(annotationCategoryIds)
           .map((categoryId) => this.categoriesById.get(categoryId))
           .filter((category): category is Category => category != null);
+        const interestedEntityNames = filteredInterestedParties
+          .map((party) => this.mapEntities.find((entity) => entity.id_entity === party.id_entity)?.name ?? `Entidad #${party.id_entity}`);
 
-        const votesCount = votes.length;
+        const votesCount = filteredVotes.length;
         const averageVotes = votesCount > 0
-          ? votes.reduce((sum, vote) => sum + vote.stars, 0) / votesCount
+          ? filteredVotes.reduce((sum, vote) => sum + vote.stars, 0) / votesCount
           : null;
 
         const popupData: AnnotationPopupData = {
           annotation,
-          evidences,
+          evidences: filteredEvidences,
           categories,
+          interestedParties: filteredInterestedParties,
+          interestedEntityNames,
           averageVotes,
           votesCount
         };
@@ -2275,6 +2318,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       createdByType: citizen ? 'Ciudadano' : null,
       averageRating: data.averageVotes,
       votesCount: data.votesCount,
+      interestedEntities: data.interestedEntityNames,
       evidences: data.evidences
     };
   }
@@ -2290,6 +2334,12 @@ export class MapComponent implements AfterViewInit, OnDestroy {
     const votesHtml = data.averageVotes != null
       ? `${data.averageVotes.toFixed(1)} / 5 (${data.votesCount} voto${data.votesCount === 1 ? '' : 's'})`
       : 'Sin votos';
+    const neighborhoodHtml = data.annotation?.id_neighborhood != null
+      ? this.neighborhoods.find((item) => item.id_neighborhood === data.annotation?.id_neighborhood)?.name ?? `Barrio #${data.annotation.id_neighborhood}`
+      : 'Sin barrio';
+    const interestedEntitiesHtml = data.interestedEntityNames.length > 0
+      ? data.interestedEntityNames.join(', ')
+      : 'Sin entidades asociadas';
     const evidencesHtml = data.evidences.length > 0
       ? `<div style="display:grid;gap:0.35rem;">${data.evidences.map((evidence) => {
           const url = this.apiClient.imageUrl(evidence.file_url);
@@ -2303,6 +2353,8 @@ export class MapComponent implements AfterViewInit, OnDestroy {
         <strong>Anotación #${annotationId}</strong>
         <span><strong>Descripción:</strong> ${description}</span>
         <span><strong>Categorías:</strong> ${categoriesHtml}</span>
+        <span><strong>Barrio:</strong> ${neighborhoodHtml}</span>
+        <span><strong>Entidades interesadas:</strong> ${interestedEntitiesHtml}</span>
         <span><strong>Fecha:</strong> ${registrationDate}</span>
         <span><strong>Votación:</strong> ${votesHtml}</span>
         <span><strong>Ubicación:</strong> ${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}</span>
@@ -2318,6 +2370,24 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   }
 
   readonly resolveEvidenceImageUrl = (path: string): string => this.apiClient.imageUrl(path);
+
+  canCreateAnnotations(): boolean {
+    return this.authService.hasAnyRole(['Funcionario', 'Ciudadano']);
+  }
+
+  private inferFileTypeFromName(fileName: string): string {
+    const lowered = fileName.toLowerCase();
+    if (lowered.endsWith('.png')) return 'image/png';
+    if (lowered.endsWith('.jpg') || lowered.endsWith('.jpeg')) return 'image/jpeg';
+    if (lowered.endsWith('.webp')) return 'image/webp';
+    if (lowered.endsWith('.gif')) return 'image/gif';
+    if (lowered.endsWith('.mp4')) return 'video/mp4';
+    if (lowered.endsWith('.webm')) return 'video/webm';
+    if (lowered.endsWith('.ogg')) return 'video/ogg';
+    if (lowered.endsWith('.mov')) return 'video/quicktime';
+    if (lowered.endsWith('.m4v')) return 'video/x-m4v';
+    return 'application/octet-stream';
+  }
 
   private focusOnNeighborhood(neighborhoodId: number | null): void {
     // Sincroniza selección lógica con el barrio enfocado (incluye click sobre polígonos).

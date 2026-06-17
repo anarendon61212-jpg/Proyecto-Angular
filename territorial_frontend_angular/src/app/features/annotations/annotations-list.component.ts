@@ -14,7 +14,9 @@ import {
   AnnotationPayload,
   Category,
   Citizen,
+  Evidence,
   Entity,
+  InterestedParty,
   Neighborhood,
   TerritorialStatus,
   Vote,
@@ -32,6 +34,7 @@ import {
   PointCrudService,
   VoteCrudService
 } from '../../core/api/territorial-crud.services';
+import { ApiClient } from '../../core/api/api-client.service';
 import { DataTableAction, DataTableColumn } from '../../shared/components/data-table/data-table.component';
 import { DataTableComponent } from '../../shared/components/data-table/data-table.component';
 import { FileUploadComponent } from '../../shared/components/file-upload/file-upload.component';
@@ -65,7 +68,7 @@ import { normalizeStatus } from '../../core/utils/status.utils';
             <label>
               Barrio
               <select formControlName="id_neighborhood" [disabled]="isLocationPrefilledFromMap">
-                <option value="">Sin barrio</option>
+                <option value="">Seleccione barrio</option>
                 <option *ngFor="let neighborhood of neighborhoods" [value]="neighborhood.id_neighborhood">
                   {{ neighborhood.name }}
                 </option>
@@ -208,10 +211,12 @@ import { normalizeStatus } from '../../core/utils/status.utils';
             <p><strong>Categorías:</strong></p>
             <div class="chip-list">
               <span *ngFor="let category of selectedAnnotation.categories" class="chip">{{ category.name }}</span>
+              <span *ngIf="!selectedAnnotation.categories?.length" class="chip">Sin categorías</span>
             </div>
             <p><strong>Entidades interesadas:</strong></p>
             <div class="chip-list">
-              <span *ngFor="let party of selectedAnnotation.interested_parties" class="chip">ID entidad {{ party.id_entity }}</span>
+              <span *ngFor="let party of selectedAnnotation.interested_parties" class="chip">{{ getEntityName(party.id_entity) }}</span>
+              <span *ngIf="!selectedAnnotation.interested_parties?.length" class="chip">Sin entidades asociadas</span>
             </div>
           </div>
         </div>
@@ -219,7 +224,20 @@ import { normalizeStatus } from '../../core/utils/status.utils';
         <div class="evidence-section">
           <h3>Fotos / Evidencias</h3>
           <div *ngIf="selectedAnnotation.evidences?.length; else noEvidence" class="evidence-grid">
-            <img *ngFor="let evidence of selectedAnnotation.evidences" [src]="evidence.file_url" alt="Evidencia" />
+            <img
+              *ngFor="let evidence of selectedAnnotation.evidences"
+              [src]="resolveEvidenceUrl(evidence.file_url)"
+              alt="Evidencia"
+              [hidden]="!isImageEvidence(evidence)"
+            />
+            <video
+              *ngFor="let evidence of selectedAnnotation.evidences"
+              [hidden]="!isVideoEvidence(evidence)"
+              controls
+              preload="metadata"
+            >
+              <source [src]="resolveEvidenceUrl(evidence.file_url)" [type]="evidence.file_type || 'video/mp4'" />
+            </video>
           </div>
           <ng-template #noEvidence><p>No hay evidencias registradas.</p></ng-template>
         </div>
@@ -271,13 +289,14 @@ import { normalizeStatus } from '../../core/utils/status.utils';
     ".chip-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }",
     ".chip { background: rgba(20, 89, 245, 0.1); border-radius: 999px; padding: 0.4rem 0.75rem; font-size: 0.85rem; }",
     ".evidence-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.75rem; }",
-    ".evidence-grid img { width: 100%; min-height: 120px; object-fit: cover; border-radius: 0.75rem; }",
+    ".evidence-grid img, .evidence-grid video { width: 100%; min-height: 120px; object-fit: cover; border-radius: 0.75rem; border: 1px solid var(--color-border); background: #000; }",
     ".rating-section { display: grid; gap: 1rem; }",
     "@media (max-width: 1100px) { .annotations-page { grid-template-columns: 1fr; } .detail-grid { grid-template-columns: 1fr; } }"
   ],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class AnnotationsListComponent {
+  private readonly apiClient = inject(ApiClient);
   private readonly annotationService = inject(AnnotationCrudService);
   private readonly categoryService = inject(CategoryCrudService);
   private readonly citizenService = inject(CitizenCrudService);
@@ -388,7 +407,13 @@ export class AnnotationsListComponent {
   }
 
   createAnnotation(): void {
+    if (!this.canCreateAnnotations()) {
+      this.toastService.warning('Acceso denegado', 'Solo ciudadanos y funcionarios pueden crear anotaciones.');
+      return;
+    }
+
     const idCitizen = this.annotationForm.controls.id_citizen.value;
+    const neighborhoodId = this.annotationForm.controls.id_neighborhood.value;
     const description = this.annotationForm.controls.description.value;
     const latitude = this.annotationForm.controls.latitude.value;
     const longitude = this.annotationForm.controls.longitude.value;
@@ -401,6 +426,11 @@ export class AnnotationsListComponent {
 
     if (!description?.trim()) {
       this.toastService.danger('Campo requerido', 'Debe escribir una descripción.');
+      return;
+    }
+
+    if (!neighborhoodId) {
+      this.toastService.warning('Barrio requerido', 'Solo se permiten anotaciones en barrios demarcados.');
       return;
     }
 
@@ -427,9 +457,7 @@ export class AnnotationsListComponent {
     }
 
     const payload: AnnotationPayload = {
-      id_neighborhood: this.annotationForm.controls.id_neighborhood.value
-        ? Number(this.annotationForm.controls.id_neighborhood.value)
-        : undefined,
+      id_neighborhood: Number(neighborhoodId),
       id_citizen: Number(idCitizen),
       description: description.trim(),
       latitude: Number(latitude),
@@ -487,6 +515,8 @@ export class AnnotationsListComponent {
         const formData = new FormData();
         formData.append('id_annotation', String(annotation.id_annotation));
         formData.append('file', file);
+        formData.append('file_type', file.type || this.inferFileTypeFromName(file.name));
+        formData.append('file_size', String(file.size));
         tasks.push(this.evidenceService.createForm(formData));
       }
 
@@ -516,19 +546,46 @@ export class AnnotationsListComponent {
   }
 
   selectAnnotation(annotationId: number): void {
-    this.annotationService.getById(annotationId).subscribe((annotation) => {
-      const annotationDetail = annotation as AnnotationDetail;
-      annotationDetail.status = normalizeStatus(annotationDetail.status);
-      this.selectedAnnotation = annotationDetail;
-      this.cdr.markForCheck();
-      
-      if (annotationDetail.id_citizen) {
-        this.citizenService.getById(annotationDetail.id_citizen).subscribe((citizen) => {
-          this.selectedAnnotation = { ...this.selectedAnnotation!, citizen };
-          this.cdr.markForCheck();
-        });
-      }
-      
+    this.annotationService.getById(annotationId).pipe(
+      catchError(() => {
+        this.toastService.danger('No disponible', 'No fue posible cargar la anotación.');
+        return of(null);
+      })
+    ).subscribe((annotation) => {
+      if (!annotation) return;
+
+      const baseAnnotation = { ...(annotation as AnnotationDetail), status: normalizeStatus(annotation.status) };
+
+      forkJoin({
+        citizen: baseAnnotation.id_citizen
+          ? this.citizenService.getById(baseAnnotation.id_citizen).pipe(catchError(() => of(undefined)))
+          : of(undefined),
+        annotationCategories: this.annotationCategoryService.listCollection({ id_annotation: annotationId }).pipe(
+          catchError(() => of({ items: [], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+        ),
+        interestedParties: this.interestedPartyService.listCollection({ id_annotation: annotationId }).pipe(
+          catchError(() => of({ items: [], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+        ),
+        evidences: this.evidenceService.listCollection({ id_annotation: annotationId }).pipe(
+          catchError(() => of({ items: [], page: 1, pageSize: 0, totalItems: 0, totalPages: 1, paginated: false }))
+        )
+      }).subscribe(({ citizen, annotationCategories, interestedParties, evidences }) => {
+        const filteredRelations = annotationCategories.items.filter((relation) => relation.id_annotation === annotationId);
+        const filteredInterestedParties = interestedParties.items.filter((party) => party.id_annotation === annotationId);
+        const filteredEvidences = evidences.items.filter((evidence) => evidence.id_annotation === annotationId);
+        const categoryIds = filteredRelations.map((relation) => relation.id_category);
+        const detail: AnnotationDetail = {
+          ...baseAnnotation,
+          citizen,
+          neighborhood: this.neighborhoods.find((item) => item.id_neighborhood === baseAnnotation.id_neighborhood),
+          categories: this.categories.filter((category) => categoryIds.includes(category.id_category)),
+          interested_parties: filteredInterestedParties as InterestedParty[],
+          evidences: filteredEvidences as Evidence[]
+        };
+        this.selectedAnnotation = detail;
+        this.cdr.markForCheck();
+      });
+
       this.checkUserVote(annotationId);
       this.calculateRatingStats(annotationId);
       this.toastService.info('Detalle cargado', `Detalle de anotación #${annotationId} cargado.`);
@@ -687,6 +744,51 @@ export class AnnotationsListComponent {
       this.toastService.info('Anotaciones', 'Ubicación del mapa precargada en el formulario.');
       this.cdr.markForCheck();
     });
+  }
+
+  canCreateAnnotations(): boolean {
+    return this.authService.hasAnyRole(['Funcionario', 'Ciudadano']);
+  }
+
+  getEntityName(entityId: number): string {
+    return this.entities.find((entity) => entity.id_entity === entityId)?.name ?? `Entidad #${entityId}`;
+  }
+
+  resolveEvidenceUrl(path?: string | null): string {
+    return this.apiClient.imageUrl(path);
+  }
+
+  isImageEvidence(evidence: Evidence): boolean {
+    // Regla robusta: todo lo que no sea video se renderiza como imagen.
+    return !this.isVideoEvidence(evidence);
+  }
+
+  isVideoEvidence(evidence: Evidence): boolean {
+    const type = String(evidence.file_type ?? '').toLowerCase();
+    const url = String(evidence.file_url ?? '').toLowerCase();
+    return (
+      type.startsWith('video/') ||
+      type.includes('mp4') ||
+      type.includes('webm') ||
+      type.includes('ogg') ||
+      type.includes('mov') ||
+      type.includes('m4v') ||
+      /\.(mp4|webm|ogg|mov|m4v)$/i.test(url)
+    );
+  }
+
+  private inferFileTypeFromName(fileName: string): string {
+    const lowered = fileName.toLowerCase();
+    if (lowered.endsWith('.png')) return 'image/png';
+    if (lowered.endsWith('.jpg') || lowered.endsWith('.jpeg')) return 'image/jpeg';
+    if (lowered.endsWith('.webp')) return 'image/webp';
+    if (lowered.endsWith('.gif')) return 'image/gif';
+    if (lowered.endsWith('.mp4')) return 'video/mp4';
+    if (lowered.endsWith('.webm')) return 'video/webm';
+    if (lowered.endsWith('.ogg')) return 'video/ogg';
+    if (lowered.endsWith('.mov')) return 'video/quicktime';
+    if (lowered.endsWith('.m4v')) return 'video/x-m4v';
+    return 'application/octet-stream';
   }
 
   private checkUserVote(annotationId: number): void {

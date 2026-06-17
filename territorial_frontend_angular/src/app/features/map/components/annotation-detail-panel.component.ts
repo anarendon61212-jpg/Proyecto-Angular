@@ -24,6 +24,7 @@ export interface AnnotationDetailPanelData {
   createdByType: string | null;
   averageRating: number | null;
   votesCount: number;
+  interestedEntities: string[];
   evidences: Evidence[];
 }
 
@@ -79,6 +80,10 @@ export interface AnnotationDetailPanelData {
           <div><small>Anotado por</small><strong>{{ selectedAnnotation.createdByName ?? 'Sin dato' }}</strong></div>
         </div>
         <p class="annotation-coords"><strong>Coordenadas:</strong> {{ selectedAnnotation.latitude.toFixed(6) }}, {{ selectedAnnotation.longitude.toFixed(6) }}</p>
+        <p class="annotation-coords">
+          <strong>Entidades interesadas:</strong>
+          {{ selectedAnnotation.interestedEntities.length > 0 ? selectedAnnotation.interestedEntities.join(', ') : 'Sin entidades asociadas' }}
+        </p>
       </section>
 
       <section class="annotation-detail__section">
@@ -96,6 +101,11 @@ export interface AnnotationDetailPanelData {
           <div class="annotation-evidence-more" *ngIf="imageEvidences.length > 3">
             +{{ imageEvidences.length - 3 }}<br>ver más
           </div>
+        </div>
+        <div class="annotation-video-grid" *ngIf="videoEvidences.length > 0">
+          <video *ngFor="let evidence of videoEvidences.slice(0, 2)" controls preload="metadata">
+            <source [src]="toAbsoluteUrl(evidence.file_url)" [type]="evidence.file_type || 'video/mp4'" />
+          </video>
         </div>
         <ng-template #noEvidenceState>
           <p class="annotation-empty">No hay evidencias de imagen registradas.</p>
@@ -136,6 +146,8 @@ export interface AnnotationDetailPanelData {
     `.annotation-info-grid strong { font-size: 0.78rem; color: #0f172a; font-weight: 700; }`,
     `.annotation-coords { color: #64748b !important; font-size: 0.75rem !important; }`,
     `.annotation-evidence-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.45rem; }`,
+    `.annotation-video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; margin-top: 0.45rem; }`,
+    `.annotation-video-grid video { width: 100%; border-radius: 10px; border: 1px solid #dbe3ef; background: #000; min-height: 92px; }`,
     `.annotation-evidence-item { display: block; border-radius: 10px; overflow: hidden; border: 1px solid #dbe3ef; background: #f8fafc; min-height: 72px; }`,
     `.annotation-evidence-item img { width: 100%; height: 100%; object-fit: cover; display: block; }`,
     `.annotation-evidence-more { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed #cbd5e1; border-radius: 10px; font-size: 0.74rem; color: #475569; background: #f8fafc; min-height: 72px; text-align: center; line-height: 1.15; }`,
@@ -155,11 +167,27 @@ export class AnnotationDetailPanelComponent {
 
   get imageEvidences(): Evidence[] {
     if (!this.selectedAnnotation) return [];
-    return this.selectedAnnotation.evidences.filter((evidence) => {
-      const type = String(evidence.file_type ?? '').toLowerCase();
-      const url = String(evidence.file_url ?? '').toLowerCase();
-      return type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(url);
-    });
+    // Para no depender del nombre/extensión, todo lo que no sea video se muestra como imagen.
+    return this.selectedAnnotation.evidences.filter((evidence) => !this.isVideoEvidence(evidence));
+  }
+
+  get videoEvidences(): Evidence[] {
+    if (!this.selectedAnnotation) return [];
+    return this.selectedAnnotation.evidences.filter((evidence) => this.isVideoEvidence(evidence));
+  }
+
+  private isVideoEvidence(evidence: Evidence): boolean {
+    const type = String(evidence.file_type ?? '').toLowerCase();
+    const url = String(evidence.file_url ?? '').toLowerCase();
+    return (
+      type.startsWith('video/') ||
+      type.includes('mp4') ||
+      type.includes('webm') ||
+      type.includes('ogg') ||
+      type.includes('mov') ||
+      type.includes('m4v') ||
+      /\.(mp4|webm|ogg|mov|m4v)$/i.test(url)
+    );
   }
 
   toAbsoluteUrl(path: string): string {
