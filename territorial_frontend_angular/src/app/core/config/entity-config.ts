@@ -232,12 +232,22 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
         placeholder: '+57 3xx xxx xxxx'
       },
       {
-        key: 'role',
+        key: 'job_title',
         label: 'Cargo',
         type: 'text',
-        required: true,
+        required: false,
         placeholder: 'Ej: Inspector, Gestor territorial',
         minLength: 2
+      },
+      {
+        key: 'role',
+        label: 'Rol',
+        type: 'select',
+        required: true,
+        options: [
+          { label: 'Administrador', value: 'Administrador' },
+          { label: 'Funcionario', value: 'Funcionario' }
+        ]
       },
       {
         key: 'id_entity',

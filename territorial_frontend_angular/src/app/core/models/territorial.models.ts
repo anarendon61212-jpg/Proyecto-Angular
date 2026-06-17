@@ -31,6 +31,7 @@ export interface Official {
   name: string;
   email: string;
   phone?: string | null;
+  job_title?: string | null;
   role: string;
   status: TerritorialStatus;
   last_latitude?: number | null;
