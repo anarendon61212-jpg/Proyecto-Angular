@@ -24,6 +24,7 @@ export interface DependencyCheckService {
 interface DependencyCheckResult {
   check: DependencyCheck;
   items: any[];
+  checkFailed?: boolean;
 }
  
 @Component({
@@ -356,9 +357,19 @@ export class GenericCrudListComponent implements OnInit, OnDestroy {
       // Validar dependencias si está configurado
       if (this.hasDependencyChecks()) {
         const dependencies = await this.checkDependencies(item);
-        const dependencyCount = dependencies.reduce((total, result) => total + result.items.length, 0);
+        const failedChecks = dependencies.filter((result) => result.checkFailed);
+        if (failedChecks.length > 0) {
+          this.toastService.warning(
+            'Validación incompleta',
+            `No fue posible validar todas las dependencias de este ${this.config.label.toLowerCase()}. Intenta nuevamente.`
+          );
+          return;
+        }
+
+        const dependenciesWithItems = dependencies.filter((result) => result.items.length > 0);
+        const dependencyCount = dependenciesWithItems.reduce((total, result) => total + result.items.length, 0);
         if (dependencyCount > 0) {
-          await this.showDependencyDetails(dependencies);
+          await this.showDependencyDetails(dependenciesWithItems);
           return;
         }
       }
@@ -392,16 +403,14 @@ export class GenericCrudListComponent implements OnInit, OnDestroy {
  
   private async checkDependencies(item: any): Promise<DependencyCheckResult[]> {
     const checks = this.getDependencyChecks();
-    const results = await Promise.all(checks.map((check) => this.runDependencyCheck(check, item)));
- 
-    return results.filter((result) => result.items.length > 0);
+    return Promise.all(checks.map((check) => this.runDependencyCheck(check, item)));
   }
  
   private runDependencyCheck(check: DependencyCheck, item: any): Promise<DependencyCheckResult> {
     return new Promise((resolve) => {
       const service = this.getDependencyService(check);
       if (!service) {
-        resolve({ check, items: [] });
+        resolve({ check, items: [], checkFailed: true });
         return;
       }
  
@@ -417,7 +426,7 @@ export class GenericCrudListComponent implements OnInit, OnDestroy {
             const items = Array.isArray(response) ? response : response.items || [];
             resolve({ check, items });
           },
-          error: () => resolve({ check, items: [] })
+          error: () => resolve({ check, items: [], checkFailed: true })
         });
     });
   }
