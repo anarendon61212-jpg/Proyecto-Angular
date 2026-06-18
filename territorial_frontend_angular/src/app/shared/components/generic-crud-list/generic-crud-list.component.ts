@@ -423,7 +423,12 @@ export class GenericCrudListComponent implements OnInit, OnDestroy {
         .pipe(take(1))
         .subscribe({
           next: (response: any) => {
-            const items = Array.isArray(response) ? response : response.items || [];
+            const targetId = String(item[this.config.idField]);
+            const responseItems = Array.isArray(response) ? response : response.items || [];
+            const items = responseItems.filter((dependency: any) => {
+              const dependencyValue = dependency?.[check.paramField];
+              return dependencyValue !== null && dependencyValue !== undefined && String(dependencyValue) === targetId;
+            });
             resolve({ check, items });
           },
           error: () => resolve({ check, items: [], checkFailed: true })
