@@ -239,14 +239,6 @@ export const ENTITY_CONFIGS: Record<string, EntityConfig> = {
         placeholder: '+57 3xx xxx xxxx'
       },
       {
-        key: 'job_title',
-        label: 'Cargo',
-        type: 'text',
-        required: false,
-        placeholder: 'Ej: Inspector, Gestor territorial',
-        minLength: 2
-      },
-      {
         key: 'role',
         label: 'Rol',
         type: 'select',
