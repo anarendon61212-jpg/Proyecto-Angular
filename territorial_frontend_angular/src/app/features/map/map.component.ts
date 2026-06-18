@@ -1012,24 +1012,50 @@ export class MapComponent implements AfterViewInit, OnDestroy {
   }
 
   private createNewPolygon(): void {
+    const neighborhoodId = this.selectedNeighborhoodId;
+
+    if (neighborhoodId == null) {
+      this.toastService.warning('Barrio requerido', 'Seleccione un barrio antes de guardar la demarcación.');
+      return;
+    }
+
     const pointsToSave: PointPayload[] = this.polygonPoints.map((latLng, index) => ({
-      id_neighborhood: this.selectedNeighborhoodId,
+      id_neighborhood: neighborhoodId,
       latitude: latLng.lat,
       longitude: latLng.lng,
       order: index,
       point_type: 'polygon'
     }));
 
-    pointsToSave.forEach(pointPayload => {
-      this.pointService.create(pointPayload).subscribe();
-    });
+    forkJoin(pointsToSave.map(pointPayload => this.pointService.create(pointPayload)))
+      .pipe(take(1))
+      .subscribe({
+        next: (createdPoints) => {
+          this.points = [
+            ...this.points.filter(point => !(point.point_type === 'polygon' && point.id_neighborhood === neighborhoodId)),
+            ...createdPoints
+          ];
+          this.cancelPolygonEditing();
+          this.refreshMapLayers();
+          this.focusOnNeighborhood(neighborhoodId);
+          this.toastService.success('Polígono guardado', 'La demarcación aparece en el mapa inmediatamente.');
+        },
+        error: (error) => {
+          this.toastService.danger('Error al guardar', 'No se pudo guardar la demarcación del barrio.');
+          console.error('[MapComponent] Error guardando polígono:', error);
+        }
+      });
 
-    alert('Polígono guardado exitosamente');
-    this.cancelPolygonEditing();
-    this.loadTerritorialData();
   }
 
   private updateExistingPolygon(): void {
+    const neighborhoodId = this.selectedNeighborhoodId;
+
+    if (neighborhoodId == null) {
+      this.toastService.warning('Barrio requerido', 'Seleccione un barrio antes de guardar la demarcación.');
+      return;
+    }
+
     const pointsToDelete = this.existingPolygonPoints.filter(
       existing => !this.polygonPoints.some(p => p.lat === existing.latitude && p.lng === existing.longitude)
     );
@@ -1046,7 +1072,7 @@ export class MapComponent implements AfterViewInit, OnDestroy {
         pointsToUpdate.push({ point: existingPoint, latLng });
       } else {
         pointsToCreate.push({
-          id_neighborhood: this.selectedNeighborhoodId,
+          id_neighborhood: neighborhoodId,
           latitude: latLng.lat,
           longitude: latLng.lng,
           order: index,
@@ -1055,25 +1081,50 @@ export class MapComponent implements AfterViewInit, OnDestroy {
       }
     });
 
-    pointsToDelete.forEach(point => {
-      this.pointService.delete(point.id_point).subscribe();
-    });
+    const deleteRequests = pointsToDelete.map(point => this.pointService.delete(point.id_point));
+    const updateRequests = pointsToUpdate.map(({ point, latLng }) => this.pointService.update(point.id_point, {
+      latitude: latLng.lat,
+      longitude: latLng.lng,
+      order: this.polygonPoints.indexOf(latLng)
+    }));
+    const createRequests = pointsToCreate.map(pointPayload => this.pointService.create(pointPayload));
+    const saveRequests = [...deleteRequests, ...updateRequests, ...createRequests];
 
-    pointsToUpdate.forEach(({ point, latLng }) => {
-      this.pointService.update(point.id_point, {
-        latitude: latLng.lat,
-        longitude: latLng.lng,
-        order: this.polygonPoints.indexOf(latLng)
-      }).subscribe();
-    });
+    if (saveRequests.length === 0) {
+      this.cancelPolygonEditing();
+      this.refreshMapLayers();
+      this.focusOnNeighborhood(neighborhoodId);
+      this.toastService.info('Sin cambios', 'No había cambios pendientes en el polígono.');
+      return;
+    }
 
-    pointsToCreate.forEach(pointPayload => {
-      this.pointService.create(pointPayload).subscribe();
-    });
+    forkJoin(saveRequests)
+      .pipe(take(1))
+      .subscribe({
+        next: () => {
+          this.points = [
+            ...this.points.filter(point => !(point.point_type === 'polygon' && point.id_neighborhood === neighborhoodId)),
+            ...this.polygonPoints.map((latLng, index) => ({
+              id_point: this.existingPolygonPoints[index]?.id_point ?? -Date.now() - index,
+              id_neighborhood: neighborhoodId,
+              latitude: latLng.lat,
+              longitude: latLng.lng,
+              order: index,
+              point_type: 'polygon'
+            } as Point))
+          ];
+          this.cancelPolygonEditing();
+          this.refreshMapLayers();
+          this.focusOnNeighborhood(neighborhoodId);
+          this.loadTerritorialData();
+          this.toastService.success('Polígono actualizado', 'La demarcación actualizada ya aparece en el mapa.');
+        },
+        error: (error) => {
+          this.toastService.danger('Error al guardar', 'No se pudo actualizar la demarcación del barrio.');
+          console.error('[MapComponent] Error actualizando polígono:', error);
+        }
+      });
 
-    alert('Polígono actualizado exitosamente');
-    this.cancelPolygonEditing();
-    this.loadTerritorialData();
   }
 
   private renderExistingPolygonMarkers(): void {
